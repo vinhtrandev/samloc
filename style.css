@@ -1025,7 +1025,7 @@ body {
 
 .sb-head {
     display: grid;
-    grid-template-columns: 32px 1fr 70px 80px;
+    grid-template-columns: 32px 1fr 70px;
     padding: 8px 12px;
     background: var(--surface2);
     font-size: 11px;
@@ -1037,7 +1037,7 @@ body {
 
 .sb-row {
     display: grid;
-    grid-template-columns: 32px 1fr 70px 80px;
+    grid-template-columns: 32px 1fr 70px;
     padding: 10px 12px;
     border-top: 1px solid var(--border);
     align-items: center;

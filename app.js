@@ -554,14 +554,13 @@ function renderBoard() {
 
     // Scoreboard
     const sb = document.getElementById('scoreboard');
-    sb.innerHTML = `<div class="sb-head"><span>#</span><span>Tên</span><span style="text-align:right">Điểm</span><span style="text-align:right">Tiền</span></div>`;
+    sb.innerHTML = `<div class="sb-head"><span>#</span><span>Tên</span><span style="text-align:right">Điểm</span></div>`;
     order.forEach((pi, rank) => {
         const t = tot[pi];
         sb.innerHTML += `<div class="sb-row${rank === 0 ? ' leader' : ''}">
       <span style="font-size:14px">${rank === 0 ? '🏆' : '#' + (rank + 1)}</span>
       <span class="sb-name">${names[pi]}</span>
       <span class="sb-pts ${t >= 0 ? 'pos' : 'neg'}">${t > 0 ? '+' : ''}${t}</span>
-      <span class="sb-money">${t >= 0 ? '+' : ''}${Math.abs(t).toLocaleString('vi-VN')}k</span>
     </div>`;
     });
 
@@ -792,18 +791,30 @@ function processFile(file) {
             for (let i = 1; i < data.length; i++) {
                 const row = data[i];
                 if (!row[0] || String(row[0]).startsWith('TỔNG')) continue;
-                const scores = row.slice(nameStart, nameStart + n).map(v => parseInt(v) || 0);
+                const scores = row.slice(nameStart, nameStart + n).map(v => Number(v) || 0);
                 const noteStr = row[nameStart + n] || '';
                 const tags = Array.from({ length: n }, () => []);
+                const scBonus = scores.map(() => 0);
                 noteStr.split('|').forEach(seg => {
                     const m = seg.trim().match(/^(.+?):\[(.+?)\]$/); if (!m) return;
                     const idx = impNames.findIndex(nm => nm.trim() === m[1].trim());
-                    if (idx >= 0) tags[idx] = m[2].split(',').map(t => {
-                        const found = Object.entries(TLBL).find(([, v]) => v === t.trim());
-                        return found ? found[0] : t.trim();
-                    });
+                    if (idx >= 0) {
+                        tags[idx] = m[2].split(',').map(t => {
+                            const found = Object.entries(TLBL).find(([, v]) => v === t.trim());
+                            return found ? found[0] : t.trim();
+                        });
+                        // tính scBonus cho các tag bonus (không phải lá)
+                        tags[idx].forEach(tag => {
+                            if (['X', 'Xchan', 'Chan', 'Q', 'Qbat'].includes(tag)) {
+                                // bonus sẽ là toàn bộ score nếu mode xam, hoặc phần bonus trong normal
+                                scBonus[idx] = scores[idx]; // approximation
+                            }
+                        });
+                    }
                 });
-                newHist.push({ scores, scLa: scores.map(() => 0), scBonus: scores.map(() => 0), tags, names: [...impNames], mode: String(row[2]).includes('Sâm') ? 'xam' : 'normal', ts: row[1] || '' });
+                // scLa = scores - scBonus (phần điểm từ lá bài)
+                const scLa = scores.map((s, i) => s - scBonus[i]);
+                newHist.push({ scores, scLa, scBonus: scores.map(() => 0), tags, names: [...impNames], mode: String(row[2]).includes('Sâm') ? 'xam' : 'normal', ts: row[1] || '' });
             }
 
             showConfirm({
