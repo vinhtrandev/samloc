@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sâm Lốc — Tính Điểm</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+</head>
+
+<body>
+
+    <div class="app">
+
+        <!-- ═══════════════════════════════
+       HEADER
+  ═══════════════════════════════ -->
+        <div class="header">
+            <div style="display:flex;flex-direction:column;gap:2px;">
+                <div class="header-title"><span>Sâm</span> Lốc</div>
+                <div
+                    style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;">
+                    Tool tính điểm</div>
+            </div>
+            <div class="header-actions">
+                <button class="sec-btn" onclick="exportXLSX()">📥 Xuất Excel</button>
+                <label class="sec-btn" style="cursor:pointer;">📤 Nhập file
+                    <input type="file" accept=".xlsx,.xls" onchange="importXLSX(event)" style="display:none;">
+                </label>
+                <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Chuyển sáng/tối">
+                    <span id="theme-icon">🌙</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════
+       NAV
+  ═══════════════════════════════ -->
+        <div class="nav">
+            <button class="nav-btn active" onclick="goPage('game')" id="nav-game">🃏 Chơi</button>
+            <button class="nav-btn" onclick="goPage('admin')" id="nav-admin">⚙️ Luật chơi</button>
+            <button class="nav-btn" onclick="goPage('data')" id="nav-data">💾 Dữ liệu</button>
+            <button class="nav-btn" onclick="goPage('chart')" id="nav-chart">🔥 Biến động</button>
+        </div>
+
+        <!-- ═══════════════════════════════
+       PAGE: GAME
+  ═══════════════════════════════ -->
+        <div class="page show" id="page-game">
+
+            <div class="rule-summary" id="rule-summary"></div>
+
+            <!-- Player setup -->
+            <div class="card">
+                <div class="card-title">Người chơi</div>
+                <div class="btn-group">
+                    <button class="btn-outline" onclick="setPlayers(2)" id="pbtn2">2 người</button>
+                    <button class="btn-outline" onclick="setPlayers(3)" id="pbtn3">3 người</button>
+                    <button class="btn-outline active" onclick="setPlayers(4)" id="pbtn4">4 người</button>
+                </div>
+                <div class="player-names" id="player-names"></div>
+            </div>
+
+            <!-- Van input -->
+            <div class="card">
+                <div class="van-num-label" id="van-num">Nhập ván 1</div>
+
+                <div class="mode-tabs">
+                    <button class="mode-tab active" onclick="setMode('normal')" id="tab-normal">🃏 Bình thường</button>
+                    <button class="mode-tab" onclick="setMode('xam')" id="tab-xam">🎯 Báo sâm</button>
+                </div>
+
+                <!-- Normal mode -->
+                <div id="mode-normal">
+                    <div class="van-grid" id="van-grid"></div>
+                    <div class="xam-section" id="bonus-normal" style="display:none;">
+                        <div class="sec-title">Thưởng thêm</div>
+                        <div class="bonus-grid" id="bonus-normal-inner"></div>
+                    </div>
+                </div>
+
+                <!-- Sâm mode -->
+                <div id="mode-xam" style="display:none;">
+                    <div class="xam-section">
+                        <div class="sec-title">Ai báo sâm?</div>
+                        <div class="picker-grid" id="xam-picker"></div>
+                    </div>
+                    <div class="xam-section" id="chan-panel" style="display:none;">
+                        <div class="sec-title">Kết quả sâm</div>
+                        <div class="picker-grid" id="chan-picker"></div>
+                        <div class="hint-text" id="hint-chan"></div>
+                        <label class="tc-row">
+                            <input type="checkbox" id="xam-tc" onchange="toggleChan()">
+                            Sâm thành công (không bị chặn)
+                        </label>
+                    </div>
+                </div>
+
+                <button class="add-btn" id="add-van-btn" onclick="handleAddVan(event)">
+                    <span class="btn-content">
+                        <span class="btn-icon">＋</span>
+                        <span class="btn-text">Thêm ván này</span>
+                    </span>
+                    <span class="btn-spinner"><span class="spinner-ring"></span></span>
+                </button>
+            </div>
+
+            <!-- Board (hidden until first van) -->
+            <div id="board-wrap" style="display:none;">
+                <div class="card">
+                    <div class="card-title">Bảng điểm tổng</div>
+                    <div class="scoreboard" id="scoreboard"></div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Lịch sử các ván</div>
+                    <div class="history-wrap">
+                        <table id="hist-table"></table>
+                    </div>
+                    <div class="bottom-bar" style="margin-top:12px;">
+                        <button class="sec-btn danger" onclick="resetGame()">🔄 Ván mới</button>
+                        <button class="sec-btn" onclick="exportXLSX()">📥 Xuất Excel</button>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /page-game -->
+
+        <!-- ═══════════════════════════════
+       PAGE: ADMIN
+  ═══════════════════════════════ -->
+        <div class="page" id="page-admin">
+            <div class="card">
+
+                <div class="admin-sub-title">🃏 Bình thường</div>
+                <div class="rule-row">
+                    <div>
+                        <div class="rule-name">Giá trị 1 lá bài</div>
+                        <div class="rule-desc">Mỗi lá còn lại tính bao nhiêu điểm</div>
+                    </div>
+                    <div class="rule-ctrl">
+                        <input type="number" id="cfg-la" min="0.1" max="100" step="0.1" oninput="previewRules()">
+                        <span class="unit">đ / lá</span>
+                    </div>
+                </div>
+
+                <div class="admin-sub-title">🎯 Sâm</div>
+                <div class="rule-row">
+                    <div>
+                        <div class="rule-name">Sâm thành công</div>
+                        <div class="rule-desc">Mỗi người còn lại trả người sâm số này</div>
+                    </div>
+                    <div class="rule-ctrl">
+                        <input type="number" id="cfg-xw" min="1" max="999" oninput="previewRules()">
+                        <span class="unit">đ / người</span>
+                    </div>
+                </div>
+                <div class="rule-row">
+                    <div>
+                        <div class="rule-name">Sâm bị chặn — phạt người sâm</div>
+                        <div class="rule-desc">Người sâm trả người chặn</div>
+                    </div>
+                    <div class="rule-ctrl">
+                        <input type="number" id="cfg-xl" min="1" max="999" oninput="previewRules()">
+                        <span class="unit">đ</span>
+                    </div>
+                </div>
+
+                <div class="admin-sub-title">🔥 Tứ quý</div>
+                <div class="rule-row">
+                    <div>
+                        <div class="rule-name">Điểm tứ quý</div>
+                        <div class="rule-desc">Thu từ mỗi người còn lại</div>
+                    </div>
+                    <div class="rule-ctrl">
+                        <input type="number" id="cfg-tq" min="1" max="999" oninput="previewRules()">
+                        <span class="unit">đ / người</span>
+                    </div>
+                </div>
+                <div class="rule-row">
+                    <div>
+                        <div class="rule-name">Bật tứ quý</div>
+                        <div class="rule-desc">Tắt nếu không chơi tứ quý</div>
+                    </div>
+                    <div class="rule-ctrl">
+                        <label class="tog"><input type="checkbox" id="cfg-tq-on" onchange="previewRules()"><span
+                                class="tog-sl"></span></label>
+                    </div>
+                </div>
+
+                <div class="admin-sub-title">⚡ Cháy bài</div>
+                <div class="rule-row">
+                    <div>
+                        <div class="rule-name">Số lá phạt cháy bài</div>
+                        <div class="rule-desc">Cộng thêm vào số lá thực tế khi tính tiền</div>
+                    </div>
+                    <div class="rule-ctrl">
+                        <input type="number" id="cfg-chay" min="1" max="52" step="1" oninput="previewRules()">
+                        <span class="unit">lá</span>
+                    </div>
+                </div>
+                <div class="rule-row">
+                    <div>
+                        <div class="rule-name">Bật cháy bài</div>
+                        <div class="rule-desc">Tắt nếu không chơi cháy bài</div>
+                    </div>
+                    <div class="rule-ctrl">
+                        <label class="tog"><input type="checkbox" id="cfg-chay-on" onchange="previewRules()"><span
+                                class="tog-sl"></span></label>
+                    </div>
+                </div>
+
+                <div class="preview" id="admin-preview"></div>
+                <br>
+                <button class="save-btn" id="save-rules-btn" onclick="handleSaveRules(event)">
+                    <span class="btn-content"><span class="btn-icon">💾</span><span class="btn-text">Lưu luật
+                            chơi</span></span>
+                    <span class="btn-spinner"><span class="spinner-ring"></span></span>
+                </button>
+
+            </div>
+        </div><!-- /page-admin -->
+
+        <!-- ═══════════════════════════════
+       PAGE: DATA
+  ═══════════════════════════════ -->
+        <div class="page" id="page-data">
+            <div class="card">
+                <div class="card-title">💾 Quản lý dữ liệu</div>
+                <div class="storage-bar">
+                    <div class="storage-dot" id="storage-dot"></div>
+                    <span id="storage-info">Đang kiểm tra...</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <button class="sec-btn success" onclick="exportXLSX()" style="justify-content:center;padding:12px;">
+                        📥 Xuất file Excel (.xlsx) — lưu vào máy tính
+                    </button>
+                    <label class="sec-btn" style="justify-content:center;padding:12px;cursor:pointer;">
+                        📤 Nhập file Excel — khôi phục dữ liệu
+                        <input type="file" accept=".xlsx,.xls" onchange="importXLSX(event)" style="display:none;">
+                    </label>
+                </div>
+                <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
+                <div class="card-title">Xóa dữ liệu</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="sec-btn danger" onclick="clearHistory()">🗑 Xóa lịch sử ván</button>
+                    <button class="sec-btn danger" onclick="clearAll()">⚠️ Xóa tất cả</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Nhập file Excel — kéo thả hoặc chọn file</div>
+                <div class="import-drop" id="drop-zone" ondragover="event.preventDefault();this.classList.add('drag')"
+                    ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
+                    📂 Kéo file .xlsx vào đây hoặc
+                    <label style="color:var(--accent);cursor:pointer;text-decoration:underline;">
+                        bấm chọn file
+                        <input type="file" accept=".xlsx,.xls" onchange="importXLSX(event)" style="display:none;">
+                    </label>
+                </div>
+                <div id="import-msg" style="margin-top:8px;font-size:12px;color:var(--green);font-weight:600;"></div>
+            </div>
+        </div><!-- /page-data -->
+
+        <!-- ═══════════════════════════════
+       PAGE: BIẾN ĐỘNG
+  ═══════════════════════════════ -->
+        <div class="page" id="page-chart">
+            <div class="card">
+                <div
+                    style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+                    <div>
+                        <div class="card-title" style="margin-bottom:2px;">📈 Biến động tài sản</div>
+                        <div style="font-size:11px;color:var(--muted);">Dòng tiền tích lũy qua từng ván</div>
+                    </div>
+                    <button class="sec-btn" onclick="renderChartPage()">🔄 Cập nhật</button>
+                </div>
+                <div id="bd-content">
+                    <div class="bd-empty">Chưa có ván nào — hãy thêm ít nhất 1 ván rồi quay lại đây!</div>
+                </div>
+            </div>
+        </div><!-- /page-chart -->
+
+    </div><!-- /app -->
+
+    <!-- ═══════════════════════════════
+     TOAST
+═══════════════════════════════ -->
+    <div class="toast-center" id="toast-center"></div>
+
+    <!-- ═══════════════════════════════
+     NOTICE MODAL (first-run)
+═══════════════════════════════ -->
+    <div id="notice-overlay"
+        style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px;">
+        <div
+            style="background:#fff;border-radius:14px;padding:28px 24px;max-width:360px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.18);text-align:center;">
+            <div style="font-size:32px;margin-bottom:12px;">⚙️</div>
+            <div style="font-size:17px;font-weight:700;margin-bottom:8px;color:#1a1a18;" class="modal-title-notice">Lưu
+                ý trước khi chơi</div>
+            <div style="font-size:14px;color:#888780;line-height:1.7;margin-bottom:20px;">
+                Nhớ vào <b style="color:#2563eb;">⚙️ Luật chơi</b> để chỉnh luật cho đúng trước khi bắt đầu nhé!
+            </div>
+            <button onclick="document.getElementById('notice-overlay').style.display='none'"
+                style="width:100%;padding:11px;font-size:14px;font-weight:700;cursor:pointer;border-radius:10px;background:#2563eb;color:#fff;border:none;">
+                Đã hiểu, bắt đầu thôi!
+            </button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════
+     CUSTOM CONFIRM/ALERT MODAL
+═══════════════════════════════ -->
+    <div class="modal-overlay" id="modal-overlay" onclick="modalClickOutside(event)">
+        <div class="modal-box" id="modal-box">
+            <div class="modal-icon" id="modal-icon"></div>
+            <div class="modal-title" id="modal-title"></div>
+            <div class="modal-msg" id="modal-msg"></div>
+            <div class="modal-actions" id="modal-actions"></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════
+     FOOTER
+═══════════════════════════════ -->
+    <div class="troll-footer">
+        <span class="status-text">© 2026 <b>4USER</b> • Người chơi là người thắng! 🏆</span>
+        <span class="joke-text">© 2026 <b>4USER</b> • Tool hỗ trợ tính điểm tiện ích</span>
+    </div>
+
+    <!-- ═══════════════════════════════
+     SCRIPTS
+═══════════════════════════════ -->
+    <script src="app.js"></script>
+    <script src="chart.js"></script>
+
+</body>
+
+</html>
