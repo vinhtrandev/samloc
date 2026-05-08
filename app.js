@@ -806,30 +806,13 @@ function processFile(file) {
                 newHist.push({ scores, scLa: scores.map(() => 0), scBonus: scores.map(() => 0), tags, names: [...impNames], mode: String(row[2]).includes('Sâm') ? 'xam' : 'normal', ts: row[1] || '' });
             }
 
-            const importedRules = {};
-            const wsR = wb.Sheets['Luật chơi'];
-            if (wsR) {
-                const rd = XLSX.utils.sheet_to_json(wsR, { header: 1 });
-                rd.slice(1).forEach(r => {
-                    if (!r[0]) return; const v = r[1];
-                    if (r[0].includes('1 lá')) importedRules.la = parseFloat(v) || rules.la;
-                    if (r[0].includes('thành công')) importedRules.xw = parseInt(v) || rules.xw;
-                    if (r[0].includes('bị chặn')) importedRules.xl = parseInt(v) || rules.xl;
-                    if (r[0].includes('Tứ quý') && !r[0].includes('Bật')) importedRules.tq = parseInt(v) || rules.tq;
-                    if (r[0].includes('Bật tứ quý')) importedRules.tqOn = v === 'Có';
-                    if (r[0].includes('Cháy bài') && !r[0].includes('Bật')) importedRules.chay = parseFloat(v) || rules.chay;
-                    if (r[0].includes('Bật cháy')) importedRules.chayOn = v === 'Có';
-                });
-            }
-
             showConfirm({
                 icon: '📤', title: 'Xác nhận nhập file?',
-                msg: `Tìm thấy ${newHist.length} ván với ${n} người:\n${impNames.join(', ')}\n\nNhập sẽ THAY THẾ dữ liệu hiện tại.`,
+                msg: `Tìm thấy ${newHist.length} ván với ${n} người:\n${impNames.join(', ')}\n\nNhập sẽ THAY THẾ lịch sử ván hiện tại (luật chơi giữ nguyên).`,
                 onYes: () => {
                     numP = n;
                     pnames = [...impNames, 'Người 1', 'Người 2', 'Người 3', 'Người 4'].slice(0, 4);
                     history = newHist;
-                    Object.assign(rules, importedRules);
                     try {
                         localStorage.setItem(LS_RULES, JSON.stringify(rules));
                         localStorage.setItem(LS_HISTORY, JSON.stringify(history));
