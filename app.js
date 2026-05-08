@@ -317,8 +317,9 @@ function renderGrid(reset = false) {
       <div class="p-name">${names[i]}</div>
       ${isChaybai
                 ? `<button class="chay-badge chay-badge-btn" onclick="toggleChay(${i})" title="Bấm để bỏ cháy bài">⚡ Cháy bài <span style="font-size:12px;opacity:.7;">✕</span></button>`
-                : `<input type="number" id="c${i}" value="${prevVals[i]}" min="0" max="10" placeholder="0–10"
+                : `<input type="number" id="c${i}" value="${prevVals[i]}" min="0" max="10" placeholder="nhập lá"
               oninput="this.classList.remove('input-error');this.value=this.value===''?'':(Math.min(10,Math.max(0,parseInt(this.value)||0)));updateCardState(${i},this.value)">
+           <div class="input-hint">số lá còn lại (0–10)</div>
            ${isWin
                     ? `<div class="win-badge">🏆 Thắng!</div>`
                     : isTied
@@ -369,16 +370,15 @@ function renderBonusPickers() {
         const batBtns = names.slice(0, numP).map((n, i) =>
             i === selTqDanh ? '' :
                 `<button class="picker-btn${selTqBat === i ? ' sel-chan' : ''}" onclick="pickTqBat(${i})">${n}</button>`).join('');
-        html += `<div class="bonus-block">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <div class="bonus-label">🔥 Người đánh tứ quý <span style="color:var(--green);font-size:11px;">+${rules.tq}đ</span></div>
-          <div class="picker-grid">${danhBtns}</div>
-        </div>
-        <div>
-          <div class="bonus-label">🔥 Người bị bắt <span style="color:var(--red);font-size:11px;">-${rules.tq}đ</span></div>
-          <div class="picker-grid">${batBtns || '<span style="font-size:11px;color:var(--muted);font-style:italic;">Chọn người đánh trước</span>'}</div>
-        </div>
+        html += `<div class="bonus-block tq-block">
+      <div class="tq-half">
+        <div class="bonus-label">🔥 Người đánh tứ quý <span style="color:var(--green);font-size:11px;">+${rules.tq}đ</span></div>
+        <div class="picker-grid">${danhBtns}</div>
+      </div>
+      <div class="tq-divider"><span>bắt</span></div>
+      <div class="tq-half">
+        <div class="bonus-label">💥 Người bị bắt <span style="color:var(--red);font-size:11px;">-${rules.tq}đ</span></div>
+        <div class="picker-grid">${batBtns || '<span class="tq-placeholder">← Chọn người đánh trước</span>'}</div>
       </div>
     </div>`;
     }

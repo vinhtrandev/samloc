@@ -33,8 +33,13 @@ function renderChartPage() {
     const totals = cumul.map(c => c[c.length - 1]);
     const order = [...Array(numP).keys()].sort((a, b) => totals[b] - totals[a]);
 
+    const playerStats = computePlayerStats(names, cumul);
+
     el.innerHTML =
+        buildHotBanner(names, playerStats, order) +
         buildStats(names, totals, order) +
+        buildStatsTable(names, playerStats, order) +
+        buildDoDoIndex(names, playerStats) +
         buildLegend(names, totals) +
         `<div class="bd-chart-wrap"><canvas id="bdChart"></canvas></div>` +
         buildLog(names);
@@ -42,6 +47,182 @@ function renderChartPage() {
     // Destroy old chart before creating new one
     if (bdChart) { try { bdChart.destroy(); } catch (e) { } bdChart = null; }
     drawChart(names, cumul, isDark);
+}
+
+// ══════════════════════════════════════════════════════════════
+// COMPUTE PER-PLAYER STATS
+// ══════════════════════════════════════════════════════════════
+function computePlayerStats(names, cumul) {
+    return names.map((_, pi) => {
+        let wins = 0, losses = 0, chaySessions = 0, tuQuy = 0, batSessions = 0, xamOk = 0, xamFail = 0;
+        let winStreak = 0, curStreak = 0, maxStreak = 0;
+
+        history.forEach(v => {
+            const sc = v.scores.slice(0, names.length);
+            const maxSc = Math.max(...sc);
+            // Win = điểm cao nhất VÀ dương
+            const isWin = sc[pi] === maxSc && maxSc > 0;
+            // Thua = điểm âm (hòa 0 không tính thua)
+            const isLoss = sc[pi] < 0;
+            const tags = v.tags[pi] || [];
+            const hasChay = tags.some(t => (typeof t === 'string' ? t : t.tag) === 'C');
+            const hasTq = tags.some(t => (typeof t === 'string' ? t : t.tag) === 'Q');
+            const hasBat = tags.some(t => (typeof t === 'string' ? t : t.tag) === 'Qbat');
+            const hasXam = tags.some(t => (typeof t === 'string' ? t : t.tag) === 'X');
+            const hasXchan = tags.some(t => (typeof t === 'string' ? t : t.tag) === 'Xchan');
+
+            if (isWin) { wins++; curStreak++; if (curStreak > maxStreak) maxStreak = curStreak; }
+            else { curStreak = 0; }
+            if (isLoss) losses++;
+            if (hasChay) chaySessions++;
+            if (hasTq) tuQuy++;
+            if (hasBat) batSessions++;
+            if (hasXam) xamOk++;
+            if (hasXchan) xamFail++;
+        });
+        winStreak = maxStreak;
+
+        // Win-streak hiện tại (từ cuối)
+        let curLiveStreak = 0;
+        for (let vi = history.length - 1; vi >= 0; vi--) {
+            const sc = history[vi].scores.slice(0, names.length);
+            const maxSc = Math.max(...sc);
+            if (sc[pi] === maxSc && maxSc > 0) curLiveStreak++;
+            else break;
+        }
+
+        return { wins, losses, chaySessions, tuQuy, batSessions, xamOk, xamFail, winStreak, curLiveStreak };
+    });
+}
+
+// ══════════════════════════════════════════════════════════════
+// HOT BANNER — "Người đỏ nhất"
+// ══════════════════════════════════════════════════════════════
+function buildHotBanner(names, stats, order) {
+    const leader = order[0];
+    const name = names[leader];
+    const st = stats[leader];
+    const total = history.reduce((s, v) => s + (v.scores[leader] || 0), 0);
+    const tqCount = stats.reduce((best, s, i) => s.tuQuy > best.count ? { i, count: s.tuQuy } : best, { i: -1, count: 0 });
+
+    let badges = '';
+    if (st.curLiveStreak >= 2)
+        badges += `<span class="hb-badge hb-streak">📈 Win streak: ${st.curLiveStreak} ván</span>`;
+    if (tqCount.count > 0)
+        badges += `<span class="hb-badge hb-tq">🃏 Tứ quý nhiều nhất: ${tqCount.count} (${names[tqCount.i]})</span>`;
+
+    return `<div class="bd-hot-banner">
+    <div class="hb-glow"></div>
+    <div class="hb-inner">
+      <div class="hb-fire">🔥</div>
+      <div class="hb-info">
+        <div class="hb-label">Người đỏ nhất</div>
+        <div class="hb-name">${name} <span class="hb-score">${total >= 0 ? '+' : ''}${Math.round(total)}</span></div>
+        <div class="hb-badges">${badges}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// STATS TABLE
+// ══════════════════════════════════════════════════════════════
+function buildStatsTable(names, stats, order) {
+    let rows = '';
+    order.forEach((pi, rank) => {
+        const s = stats[pi];
+        const rankIcon = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `#${rank + 1}`;
+        rows += `<tr>
+      <td class="st-rank">${rankIcon}</td>
+      <td class="st-name" style="color:${BD_PALETTE[pi % BD_PALETTE.length]}">${names[pi]}</td>
+      <td class="st-win">${s.wins}</td>
+      <td class="st-loss">${s.losses}</td>
+      <td class="st-chay">${s.chaySessions}</td>
+      <td class="st-tq">${s.tuQuy}</td>
+      <td class="st-bat">${s.batSessions}</td>
+      <td class="st-xam">${s.xamOk}</td>
+      <td class="st-xchan">${s.xamFail}</td>
+      <td class="st-streak">${s.winStreak}</td>
+    </tr>`;
+    });
+    return `<div class="bd-section-title">📊 Bảng thống kê chi tiết</div>
+  <div class="bd-stats-table-wrap">
+    <table class="bd-stats-table">
+      <thead><tr>
+        <th></th><th>Người</th><th>Win 🏆</th><th>Thua 📉</th><th>Cháy ⚡</th><th>Tứ quý 🔥</th><th>Bị bắt TQ 🔒</th><th>Sâm ✓ 🎯</th><th>Bị chặn 🛡</th><th>Streak dài nhất 📈</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// ĐỘ ĐỎ INDEX
+// ══════════════════════════════════════════════════════════════
+function buildDoDoIndex(names, stats) {
+    const n = names.length;
+    const totalVans = history.length || 1;
+
+    // Tính raw score tuyệt đối (0-100 scale cố định)
+    const rawScores = names.map((_, pi) => {
+        const s = stats[pi];
+        const winRate = s.wins / totalVans;           // 0-1
+        const streakFactor = Math.min(s.winStreak / Math.max(totalVans * 0.5, 1), 1); // cap at 1
+        const tqFactor = Math.min(s.tuQuy / Math.max(totalVans * 0.3, 1), 1);         // cap at 1
+        const chayRate = s.chaySessions / totalVans;
+        const batRate = s.batSessions / totalVans;
+
+        const raw = (winRate * 55)
+            + (streakFactor * 20)
+            + (tqFactor * 15)
+            - (chayRate * 25)
+            - (batRate * 10)
+            + 10; // base score
+
+        return Math.max(0, Math.min(100, Math.round(raw)));
+    });
+
+    // Relative normalize: người cao nhất = 100%, người khác tỉ lệ
+    // Nhưng chỉ normalize nếu max > 30 để tránh mọi người cùng thấp thành 100%
+    const maxRaw = Math.max(...rawScores);
+    const minRaw = Math.min(...rawScores);
+    const spread = maxRaw - minRaw;
+
+    const normalized = rawScores.map(s => {
+        if (spread < 5) {
+            // Mọi người gần bằng nhau → dùng giá trị tuyệt đối
+            return Math.round(s);
+        }
+        // Spread đủ lớn → scale relative, người cao nhất = 100%
+        return Math.round(((s - minRaw) / spread) * 85 + 15); // min 15%, max 100%
+    });
+
+    function doLabel(pct) {
+        if (pct >= 85) return '🔥';
+        if (pct >= 60) return '😎';
+        if (pct >= 40) return '🍀';
+        if (pct >= 20) return '😶';
+        return '💀';
+    }
+
+    let items = '';
+    // Sort by score desc
+    const order2 = [...Array(n).keys()].sort((a, b) => normalized[b] - normalized[a]);
+    order2.forEach(pi => {
+        const pct = normalized[pi];
+        const clr = BD_PALETTE[pi % BD_PALETTE.length];
+        items += `<div class="dodo-item">
+      <span class="dodo-icon">${doLabel(pct)}</span>
+      <span class="dodo-name" style="color:${clr}">${names[pi]}</span>
+      <div class="dodo-bar-wrap">
+        <div class="dodo-bar" style="width:${pct}%;background:${clr}"></div>
+      </div>
+      <span class="dodo-pct">${pct}%</span>
+    </div>`;
+    });
+
+    return `<div class="bd-section-title">🎰 Chỉ số Độ Đỏ™</div>
+  <div class="bd-dodo">${items}</div>`;
 }
 
 // ══════════════════════════════════════════════════════════════
