@@ -29,6 +29,9 @@
                 <label class="sec-btn" style="cursor:pointer;">📤 Nhập file
                     <input type="file" accept=".xlsx,.xls" onchange="importXLSX(event)" style="display:none;">
                 </label>
+                <button class="theme-toggle" id="sound-toggle-btn" onclick="SFX.toggle()" title="Bật/tắt âm thanh">
+                    <span id="sound-icon">🔊</span>
+                </button>
                 <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()" title="Chuyển sáng/tối">
                     <span id="theme-icon">🌙</span>
                 </button>
@@ -41,6 +44,7 @@
         <div class="nav">
             <button class="nav-btn active" onclick="goPage('game')" id="nav-game">🃏 Chơi</button>
             <button class="nav-btn" onclick="goPage('admin')" id="nav-admin">⚙️ Luật chơi</button>
+            <button class="nav-btn" onclick="goPage('sessions')" id="nav-sessions">📅 Buổi chơi</button>
             <button class="nav-btn" onclick="goPage('data')" id="nav-data">💾 Dữ liệu</button>
             <button class="nav-btn" onclick="goPage('chart')" id="nav-chart">🔥 Biến động</button>
         </div>
@@ -61,6 +65,21 @@
                     <button class="btn-outline active" onclick="setPlayers(4)" id="pbtn4">4 người</button>
                 </div>
                 <div class="player-names" id="player-names"></div>
+
+
+            </div>
+
+            <!-- Timer bar -->
+            <div class="timer-bar" id="timer-bar">
+                <div class="timer-left">
+                    <span class="timer-icon">⏱️</span>
+                    <span class="timer-label">Buổi chơi</span>
+                    <span class="timer-display" id="timer-display">00:00</span>
+                </div>
+                <div class="timer-right">
+                    <button class="timer-btn" id="timer-btn" onclick="toggleTimer()">▶ Bắt đầu</button>
+                    <button class="timer-btn timer-reset" onclick="resetTimer()" title="Reset">↺</button>
+                </div>
             </div>
 
             <!-- Van input -->
@@ -114,7 +133,21 @@
                 <div class="card">
                     <div class="card-title">Bảng điểm tổng</div>
                     <div class="scoreboard" id="scoreboard"></div>
+                    <!-- Hòa vốn -->
+                    <div class="hoavon-wrap" id="hoavon-wrap"></div>
                 </div>
+
+                <!-- Thanh toán cuối buổi -->
+                <div class="card" id="settlement-card">
+                    <div id="settlement-wrap"></div>
+                </div>
+
+                <!-- Thống kê nhanh -->
+                <div class="card" id="stats-card" style="display:none;">
+                    <div class="card-title">📊 Thống kê buổi chơi</div>
+                    <div id="stats-content"></div>
+                </div>
+
                 <div class="card">
                     <div class="card-title">Lịch sử các ván</div>
                     <div class="history-wrap">
@@ -122,7 +155,10 @@
                     </div>
                     <div class="bottom-bar" style="margin-top:12px;">
                         <button class="sec-btn danger" onclick="resetGame()">🔄 Ván mới</button>
+                        <button class="undo-btn" id="undo-btn" onclick="undoVan()" style="display:none;">↩ Hoàn
+                            tác</button>
                         <button class="sec-btn" onclick="exportXLSX()">📥 Xuất Excel</button>
+
                     </div>
                 </div>
             </div>
@@ -223,6 +259,25 @@
 
             </div>
         </div><!-- /page-admin -->
+
+        <!-- ═══════════════════════════════
+       PAGE: SESSIONS
+  ═══════════════════════════════ -->
+        <div class="page" id="page-sessions">
+            <div class="card">
+                <div class="card-title">📅 Lịch sử buổi chơi</div>
+                <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Buổi chơi được tự động lưu khi bấm "🔄
+                    Ván mới". Dữ liệu lưu trên máy của bạn.</p>
+                <div id="sessions-list"></div>
+            </div>
+            <div class="card">
+                <div class="card-title">🏅 Bảng danh dự cá nhân</div>
+                <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Kỷ lục tổng hợp từ tất cả buổi chơi đã
+                    lưu + buổi đang chơi.</p>
+                <button class="sec-btn" onclick="renderHonorBoard()" style="margin-bottom:10px;">🔄 Cập nhật</button>
+                <div id="honor-content"></div>
+            </div>
+        </div><!-- /page-sessions -->
 
         <!-- ═══════════════════════════════
        PAGE: DATA
@@ -334,6 +389,7 @@
     <!-- ═══════════════════════════════
      SCRIPTS
 ═══════════════════════════════ -->
+    <script src="sound.js"></script>
     <script src="app.js"></script>
     <script src="chart.js"></script>
 

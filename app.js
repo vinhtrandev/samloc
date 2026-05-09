@@ -7,10 +7,13 @@ const LS_THEME = 'xamloc_theme';
 const LS_RULES = 'xamloc_rules';
 const LS_HISTORY = 'xamloc_history';
 const LS_PLAYERS = 'xamloc_players';
+const LS_SESSIONS = 'xamloc_sessions';
+const LS_PRESETS = 'xamloc_presets';
+const LS_NOTES = 'xamloc_notes'; // per-van notes: { [vanIdx]: string }
 
 // ── Badge maps ─────────────────────────────────────────────────
-const TMAP = { X: 'bx', Q: 'bq', Qbat: 'bc', C: 'bc', Chan: 'bchan', Xchan: 'bc' };
-const TLBL = { X: 'Sâm ✓', Q: 'T.quý 🔥', Qbat: 'Bị bắt 🔥', C: 'Cháy', Chan: 'Chặn 🛡', Xchan: 'Bị chặn' };
+const TMAP = { X: 'bx', Q: 'bq', Qbat: 'bc', C: 'bc', Chan: 'bchan', Xchan: 'bc', DL: 'bdl', DLnhan: 'bdlnhan' };
+const TLBL = { X: 'Sâm ✓', Q: 'T.quý 🔥', Qbat: 'Bị bắt 🔥', C: 'Cháy', Chan: 'Chặn 🛡', Xchan: 'Bị chặn', DL: 'Đền làng 🏘️', DLnhan: 'Được đền 🏘️' };
 
 // ── State ──────────────────────────────────────────────────────
 let rules = { la: 0.5, xw: 10, xl: 30, tq: 5, tqOn: true, chay: 10, chayOn: true };
@@ -18,7 +21,24 @@ let history = [];
 let numP = 4;
 let pnames = ['Người 1', 'Người 2', 'Người 3', 'Người 4'];
 let mode = 'normal';
-let selXam = -1, selChan = -1, selTqDanh = -1, selTqBat = -1, selChay = [], selWin = -1;
+let selXam = -1, selChan = -1, selTqDanh = -1, selTqBat = -1, selChay = [], selWin = -1, selDenLang = -1;
+
+// ── Sessions & extras ─────────────────────────────────────────
+let sessions = []; // [{id, date, label, history, names, numP, rules, tot}]
+let vanNotes = {}; // { [vanIdx]: string }
+let playerPresets = []; // string[] — tên hay dùng
+
+// ── Timer state ────────────────────────────────────────────────
+let timerRunning = false;
+let timerSeconds = 0;
+let timerInterval = null;
+let timerStartTs = null; // epoch ms when started (for accurate resume)
+
+// ── Undo state ─────────────────────────────────────────────────
+let undoSnapshot = null; // last history before addVan
+
+// ── Auto-save session ──────────────────────────────────────────
+let currentSessionId = null; // ID của buổi đang chơi (để upsert)
 
 // ══════════════════════════════════════════════════════════════
 // DARK MODE
@@ -34,6 +54,7 @@ function toggleTheme() {
     const next = current === 'dark' ? 'light' : 'dark';
     applyTheme(next);
     localStorage.setItem(LS_THEME, next);
+    SFX.play('theme');
     showToast(next === 'dark' ? '🌙 Chế độ tối' : '☀️ Chế độ sáng', 1600);
     if (document.getElementById('page-chart').classList.contains('show')) {
         setTimeout(renderChartPage, 50);
@@ -104,12 +125,23 @@ function handleAddVan(e) {
     btn.disabled = true;
     setTimeout(() => {
         const result = addVan();
-        if (result === false) { btn.classList.remove('loading'); btn.disabled = false; return; }
+        if (result === false) {
+            SFX.play('warn');
+            btn.classList.remove('loading'); btn.disabled = false; return;
+        }
         btn.classList.remove('loading');
         btn.classList.add('success');
         iconEl.innerHTML = '<span class="check-icon">✓</span>';
         textEl.textContent = `Ván ${history.length} đã lưu!`;
         burstConfetti(btn);
+        // Chọn sound dựa theo mode/tags
+        const lastVan = history[history.length - 1];
+        if (lastVan && lastVan.mode === 'xam') {
+            const hasXamWin = lastVan.tags.some(tArr => tArr.some(t => (t.tag || t) === 'X'));
+            SFX.play(hasXamWin ? 'xamWin' : 'xamLose');
+        } else {
+            SFX.play('success');
+        }
         setTimeout(() => {
             btn.classList.remove('success');
             btn.disabled = false;
@@ -127,6 +159,7 @@ function animateSaveBtn(doWork) {
     btn.disabled = true;
     setTimeout(() => {
         doWork();
+        SFX.play('save');
         btn.classList.remove('loading');
         btn.classList.add('success');
         iconEl.innerHTML = '<span class="check-icon" style="display:inline-block;transform:scale(0) rotate(-20deg);transition:transform .25s cubic-bezier(.34,1.56,.64,1)">✓</span>';
@@ -157,7 +190,7 @@ function showModal({ icon = 'ℹ️', title, msg, buttons = [] }) {
         const btn = document.createElement('button');
         btn.className = 'modal-btn ' + (b.cls || 'modal-btn-primary');
         btn.textContent = b.label;
-        btn.onclick = () => { closeModal(); if (b.cb) b.cb(); };
+        btn.onclick = () => { closeModal(); if (b.cb) setTimeout(b.cb, 220); };
         acts.appendChild(btn);
     });
     const ov = document.getElementById('modal-overlay');
@@ -201,6 +234,8 @@ function save() {
         localStorage.setItem(LS_RULES, JSON.stringify(rules));
         localStorage.setItem(LS_HISTORY, JSON.stringify(history));
         localStorage.setItem(LS_PLAYERS, JSON.stringify({ numP, pnames }));
+        localStorage.setItem(LS_NOTES, JSON.stringify(vanNotes));
+        localStorage.setItem(LS_PRESETS, JSON.stringify(playerPresets));
     } catch (e) { console.warn('localStorage full', e); }
 }
 
@@ -223,6 +258,17 @@ function load() {
         if (h) history = JSON.parse(h);
         const pl = localStorage.getItem(LS_PLAYERS);
         if (pl) { const d = JSON.parse(pl); numP = d.numP || 4; pnames = d.pnames || pnames; }
+        const sn = localStorage.getItem(LS_SESSIONS);
+        if (sn) {
+            sessions = JSON.parse(sn);
+            // Khôi phục ID buổi đang chơi nếu có
+            const live = sessions.find(s => s.autoSaved);
+            if (live) currentSessionId = live.id;
+        }
+        const nt = localStorage.getItem(LS_NOTES);
+        if (nt) vanNotes = JSON.parse(nt);
+        const pr = localStorage.getItem(LS_PRESETS);
+        if (pr) playerPresets = JSON.parse(pr);
     } catch (e) { console.warn('load error', e); }
 }
 
@@ -241,13 +287,15 @@ function updateStorageInfo() {
 // NAV
 // ══════════════════════════════════════════════════════════════
 function goPage(p) {
-    ['game', 'admin', 'data', 'chart'].forEach(id => {
+    SFX.play('nav');
+    ['game', 'admin', 'sessions', 'data', 'chart'].forEach(id => {
         document.getElementById('page-' + id).className = 'page' + (id === p ? ' show' : '');
         document.getElementById('nav-' + id).className = 'nav-btn' + (id === p ? ' active' : '');
     });
     if (p === 'admin') loadAdminFields();
     if (p === 'data') updateStorageInfo();
     if (p === 'chart') renderChartPage();
+    if (p === 'sessions') { renderSessionsList(); renderHonorBoard(); }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -259,17 +307,18 @@ function setPlayers(n) {
         document.getElementById(id).className =
             'btn-outline' + (parseInt(id.replace('pbtn', '')) === n ? ' active' : '');
     });
-    selXam = -1; selChan = -1; selTqDanh = -1; selTqBat = -1; selChay = []; selWin = -1;
+    selXam = -1; selChan = -1; selTqDanh = -1; selTqBat = -1; selChay = []; selWin = -1; selDenLang = -1;
     renderNames(); renderGrid(); renderXamPickers(); save();
 }
 
 function renderNames() {
     const el = document.getElementById('player-names');
-    el.innerHTML = '';
+    const presetOptions = playerPresets.map(n => `<option value="${n.replace(/"/g, '&quot;')}">`).join('');
+    el.innerHTML = '<datalist id="name-presets">' + presetOptions + '</datalist>';
     for (let i = 0; i < numP; i++) {
         const v = pnames[i] || ('Người ' + (i + 1));
         el.innerHTML += `<div class="pname-wrap">
-      <input type="text" id="pn${i}" value="${v}"
+      <input type="text" id="pn${i}" value="${v}" list="name-presets"
         onchange="pnames[${i}]=this.value;save();renderXamPickers();renderGrid();"
         placeholder="Nhập tên ${i + 1}">
     </div>`;
@@ -392,23 +441,36 @@ function renderBonusPickers() {
     </div>`;
     }
 
+    // Đền làng
+    {
+        const dlBtns = names.slice(0, numP).map((n, i) =>
+            `<button class="picker-btn${selDenLang === i ? ' sel-dl' : ''}" onclick="pickDenLang(${i})">${n}</button>`).join('');
+        html += `<div class="bonus-block den-lang-block">
+      <div class="bonus-label">🏘️ Đền làng <span style="color:var(--red);font-size:11px;">trả nợ cho người thua</span></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Người đền sẽ trả thay cho tất cả người bị thua ván này</div>
+      <div class="picker-grid">${dlBtns}</div>
+      ${selDenLang !== -1 ? `<div class="den-lang-note">🏘️ <b>${names[selDenLang]}</b> sẽ đền làng — chịu toàn bộ tiền thua cho những người thua</div>` : ''}
+    </div>`;
+    }
+
     const normalInner = document.getElementById('bonus-normal-inner');
     const normalWrap = document.getElementById('bonus-normal');
     if (normalInner) normalInner.innerHTML = html;
-    if (normalWrap) normalWrap.style.display = show ? 'block' : 'none';
+    if (normalWrap) normalWrap.style.display = (show || true) ? 'block' : 'none';
 }
 
 function pickXam(i) {
     selXam = i; selChan = -1;
+    SFX.play('xam');
     document.getElementById('chan-panel').style.display = 'block';
     document.getElementById('xam-tc').checked = false;
     const cp = document.getElementById('chan-picker');
     cp.style.opacity = '1'; cp.style.pointerEvents = 'auto';
     renderXamPickers();
 }
-function pickChan(i) { selChan = (selChan === i) ? -1 : i; renderXamPickers(); }
-function pickTqDanh(i) { selTqDanh = (selTqDanh === i) ? -1 : i; if (selTqBat === i) selTqBat = -1; renderBonusPickers(); }
-function pickTqBat(i) { selTqBat = (selTqBat === i) ? -1 : i; renderBonusPickers(); }
+function pickChan(i) { SFX.play('pick'); selChan = (selChan === i) ? -1 : i; renderXamPickers(); }
+function pickTqDanh(i) { SFX.play('pick'); selTqDanh = (selTqDanh === i) ? -1 : i; if (selTqBat === i) selTqBat = -1; renderBonusPickers(); }
+function pickTqBat(i) { SFX.play('tuquy'); selTqBat = (selTqBat === i) ? -1 : i; renderBonusPickers(); }
 
 function toggleChan() {
     const tc = document.getElementById('xam-tc').checked;
@@ -419,8 +481,19 @@ function toggleChan() {
 }
 
 function toggleChay(i) {
-    selChay = selChay.includes(i) ? selChay.filter(x => x !== i) : [...selChay, i];
+    const wasIn = selChay.includes(i);
+    selChay = wasIn ? selChay.filter(x => x !== i) : [...selChay, i];
+    if (!wasIn) SFX.play('chay');
+    else SFX.play('click');
     renderBonusPickers(); renderGrid();
+}
+
+function pickDenLang(i) {
+    const wasSelected = selDenLang === i;
+    selDenLang = wasSelected ? -1 : i;
+    if (!wasSelected) SFX.play('denLang');
+    else SFX.play('click');
+    renderBonusPickers();
 }
 
 function updateCardState(i, val) { selWin = -1; autoChay(i, val); renderGrid(); }
@@ -514,7 +587,27 @@ function addVan() {
                 tags[selTqBat].push({ tag: 'Qbat', delta: -rules.tq });
             }
         }
+
+        // Đền làng
+        if (selDenLang !== -1) {
+            let totalDen = 0;
+            for (let i = 0; i < numP; i++) {
+                if (i !== selDenLang && sc[i] < 0) {
+                    const debt = -sc[i];
+                    // người đền trả nợ cho người thua
+                    sc[selDenLang] -= debt;
+                    sc[i] += debt; // người thua về 0 (từ phần lá)
+                    totalDen += debt;
+                    tags[i].push({ tag: 'DLnhan', delta: +debt });
+                }
+            }
+            if (totalDen > 0) {
+                tags[selDenLang].push({ tag: 'DL', delta: -totalDen });
+            }
+        }
     }
+
+    undoSnapshot = history.map(v => ({ ...v, scores: [...v.scores], scLa: [...v.scLa], scBonus: [...v.scBonus], tags: v.tags.map(arr => [...arr]), names: [...v.names] }));
 
     history.push({
         scores: sc, scLa: [...scLa], scBonus: [...scBonus],
@@ -522,10 +615,10 @@ function addVan() {
         ts: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
     });
     save();
+    autoSaveSession();
     renderBoard();
 
-    // Reset state
-    selXam = -1; selChan = -1; selTqDanh = -1; selTqBat = -1; selChay = []; selWin = -1;
+    selXam = -1; selChan = -1; selTqDanh = -1; selTqBat = -1; selChay = []; selWin = -1; selDenLang = -1;
     document.getElementById('chan-panel').style.display = 'none';
     document.getElementById('xam-tc').checked = false;
     const cp = document.getElementById('chan-picker');
@@ -533,13 +626,210 @@ function addVan() {
     renderGrid(true); renderXamPickers(); setMode('normal');
     document.getElementById('van-num').textContent = `Nhập ván ${history.length + 1}`;
     document.getElementById('board-wrap').style.display = 'block';
+    // Show undo button
+    const undoBtn = document.getElementById('undo-btn');
+    if (undoBtn) {
+        undoBtn.style.display = 'inline-flex';
+        clearTimeout(undoBtn._hideT);
+        undoBtn._hideT = setTimeout(() => { undoBtn.style.display = 'none'; undoSnapshot = null; }, 30000);
+    }
     showToast(`🃏 Ván ${history.length} đã lưu!`);
+    // Auto-start timer on first van
+    if (history.length === 1 && !timerRunning) toggleTimer();
+    // Auto-save names to presets
+    autoAddCurrentNamesToPresets();
+    renderPresetChips();
     return true;
 }
 
 // ══════════════════════════════════════════════════════════════
-// BOARD
+// TIMER
 // ══════════════════════════════════════════════════════════════
+function fmtTime(s) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function updateTimerDisplay() {
+    const el = document.getElementById('timer-display');
+    if (el) el.textContent = fmtTime(timerSeconds);
+    const bar = document.getElementById('timer-bar');
+    if (bar) {
+        bar.classList.toggle('timer-running', timerRunning);
+        // Color warning after 2h
+        bar.classList.toggle('timer-warn', timerSeconds >= 7200);
+    }
+}
+
+function toggleTimer() {
+    if (timerRunning) {
+        // Pause
+        clearInterval(timerInterval);
+        timerInterval = null;
+        timerRunning = false;
+        document.getElementById('timer-btn').textContent = '▶ Tiếp tục';
+        SFX.play('click');
+    } else {
+        // Start / Resume
+        timerRunning = true;
+        document.getElementById('timer-btn').textContent = '⏸ Tạm dừng';
+        SFX.play('click');
+        timerInterval = setInterval(() => {
+            timerSeconds++;
+            updateTimerDisplay();
+        }, 1000);
+    }
+    updateTimerDisplay();
+}
+
+function resetTimer() {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    timerRunning = false;
+    timerSeconds = 0;
+    document.getElementById('timer-btn').textContent = '▶ Bắt đầu';
+    SFX.play('click');
+    updateTimerDisplay();
+}
+
+// ══════════════════════════════════════════════════════════════
+// UNDO
+// ══════════════════════════════════════════════════════════════
+function undoVan() {
+    if (!undoSnapshot) return;
+    SFX.play('del');
+    showConfirm({
+        icon: '↩️', title: 'Hoàn tác ván vừa thêm?',
+        msg: `Xóa ván ${history.length} vừa nhập và khôi phục trạng thái trước đó?`,
+        yesDanger: true,
+        onYes: () => {
+            history = undoSnapshot;
+            undoSnapshot = null;
+            save();
+            document.getElementById('undo-btn').style.display = 'none';
+            if (!history.length) {
+                document.getElementById('board-wrap').style.display = 'none';
+            } else {
+                renderBoard();
+            }
+            document.getElementById('van-num').textContent = `Nhập ván ${history.length + 1}`;
+            showToast('↩ Đã hoàn tác ván vừa thêm!', 2000);
+        },
+    });
+}
+
+// ══════════════════════════════════════════════════════════════
+// HÒA VỐN
+// ══════════════════════════════════════════════════════════════
+function renderHoaVon(names, tot) {
+    const wrap = document.getElementById('hoavon-wrap');
+    if (!wrap) return;
+    const hasNeg = tot.some(t => t < 0);
+    if (!hasNeg) {
+        wrap.innerHTML = '';
+        return;
+    }
+    let html = '<div class="hoavon-title">🎯 Cần thắng để hòa vốn</div><div class="hoavon-grid">';
+    for (let i = 0; i < numP; i++) {
+        const t = tot[i];
+        if (t >= 0) continue;
+        const need = Math.abs(t);
+        // Ước tính số ván cần thắng (giả định thắng trung bình = need / avg_win_per_van)
+        const wins = history.map(v => v.scores[i]).filter(s => s > 0);
+        const avgWin = wins.length ? wins.reduce((a, b) => a + b, 0) / wins.length : rules.la * 5;
+        const vansEstimate = avgWin > 0 ? Math.ceil(need / avgWin) : '?';
+        html += `<div class="hoavon-item">
+            <span class="hoavon-name">${names[i]}</span>
+            <span class="hoavon-need neg">-${need}đ</span>
+            <span class="hoavon-arrow">→</span>
+            <span class="hoavon-est">~${vansEstimate} ván</span>
+        </div>`;
+    }
+    html += '</div>';
+    wrap.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════════
+// THỐNG KÊ NHANH
+// ══════════════════════════════════════════════════════════════
+function renderStats(names, tot) {
+    if (history.length < 2) {
+        document.getElementById('stats-card').style.display = 'none';
+        return;
+    }
+    document.getElementById('stats-card').style.display = 'block';
+
+    // Tính các chỉ số
+    const winCounts = new Array(numP).fill(0);
+    const chayCounts = new Array(numP).fill(0);
+    const xamCounts = new Array(numP).fill(0);
+    const tqCounts = new Array(numP).fill(0);
+    let biggestLoss = { val: 0, who: -1, van: -1 };
+    let biggestWin = { val: 0, who: -1, van: -1 };
+
+    history.forEach((v, vi) => {
+        // Tìm người thắng ván (điểm cao nhất ván đó)
+        const maxScore = Math.max(...v.scores);
+        v.scores.forEach((s, i) => {
+            if (s === maxScore && s > 0) winCounts[i]++;
+            if (s > biggestWin.val) { biggestWin = { val: s, who: i, van: vi + 1 }; }
+            if (s < -biggestLoss.val) { biggestLoss = { val: -s, who: i, van: vi + 1 }; }
+        });
+        v.tags.forEach((tArr, i) => tArr.forEach(t => {
+            const tag = typeof t === 'string' ? t : t.tag;
+            if (tag === 'C') chayCounts[i]++;
+            if (tag === 'X') xamCounts[i]++;
+            if (tag === 'Q') tqCounts[i]++;
+        }));
+    });
+
+    const leader = tot.indexOf(Math.max(...tot));
+    const loser = tot.indexOf(Math.min(...tot));
+    const mostWins = winCounts.indexOf(Math.max(...winCounts));
+    const mostChay = chayCounts.indexOf(Math.max(...chayCounts));
+
+    const statRows = [
+        { icon: '🏆', label: 'Đang dẫn đầu', val: names[leader], sub: `+${tot[leader]}đ tổng` },
+        { icon: '😢', label: 'Đang thua nhiều nhất', val: names[loser], sub: `${tot[loser]}đ tổng` },
+        { icon: '🎯', label: 'Thắng ván nhiều nhất', val: names[mostWins], sub: `${winCounts[mostWins]} ván` },
+        chayCounts[mostChay] > 0
+            ? { icon: '⚡', label: 'Cháy bài nhiều nhất', val: names[mostChay], sub: `${chayCounts[mostChay]} lần` }
+            : null,
+        biggestWin.who >= 0
+            ? { icon: '💰', label: 'Ván thắng lớn nhất', val: names[biggestWin.who], sub: `+${biggestWin.val}đ (ván ${biggestWin.van})` }
+            : null,
+        biggestLoss.who >= 0
+            ? { icon: '💸', label: 'Ván thua đau nhất', val: names[biggestLoss.who], sub: `-${biggestLoss.val}đ (ván ${biggestLoss.van})` }
+            : null,
+        xamCounts.some(c => c > 0)
+            ? { icon: '🎴', label: 'Sâm thành công nhiều nhất', val: names[xamCounts.indexOf(Math.max(...xamCounts))], sub: `${Math.max(...xamCounts)} lần` }
+            : null,
+    ].filter(Boolean);
+
+    let html = '<div class="stats-grid">';
+    statRows.forEach(r => {
+        html += `<div class="stat-item">
+            <span class="stat-icon">${r.icon}</span>
+            <div class="stat-body">
+                <div class="stat-label">${r.label}</div>
+                <div class="stat-val">${r.val}</div>
+                <div class="stat-sub">${r.sub}</div>
+            </div>
+        </div>`;
+    });
+    html += '</div>';
+
+    // Thêm tổng thời gian nếu timer đang chạy
+    if (timerSeconds > 0) {
+        html += `<div class="stats-timer-row">⏱️ Thời gian buổi chơi: <b>${fmtTime(timerSeconds)}</b> · ${history.length} ván</div>`;
+    }
+
+    document.getElementById('stats-content').innerHTML = html;
+}
+
 function fmtDelta(delta) {
     if (delta === undefined || delta === null) return '';
     return (delta > 0 ? '+' : '') + delta + 'đ';
@@ -568,7 +858,7 @@ function renderBoard() {
     const ht = document.getElementById('hist-table');
     let th = `<tr><th>Ván</th><th>Giờ</th>`;
     names.forEach(n => th += `<th>${n}</th>`);
-    th += `<th></th></tr>`;
+    th += `<th>📝</th><th></th></tr>`;
 
     let rows = '';
     history.forEach((v, vi) => {
@@ -599,6 +889,14 @@ function renderBoard() {
         </div>
       </td>`;
         }
+        tr += `<td>
+          <div class="van-note-cell">
+            <button class="note-btn${vanNotes[vi] ? ' has-note' : ''}" onclick="editVanNote(${vi})" title="${vanNotes[vi] ? vanNotes[vi] : 'Thêm ghi chú'}">
+              ${vanNotes[vi] ? '📝' : '✏️'}
+            </button>
+            ${vanNotes[vi] ? `<span class="note-preview">${vanNotes[vi].substring(0, 30)}${vanNotes[vi].length > 30 ? '…' : ''}</span>` : ''}
+          </div>
+        </td>`;
         tr += `<td><button class="del-btn" onclick="delVan(${vi})">🗑</button></td></tr>`;
         rows += tr;
     });
@@ -608,16 +906,23 @@ function renderBoard() {
         const t = tot[i];
         totRow += `<td class="${t >= 0 ? 'pos' : 'neg'}">${t > 0 ? '+' : ''}${t}</td>`;
     }
-    totRow += `<td></td></tr>`;
+    totRow += `<td></td><td></td></tr>`;
     ht.innerHTML = th + rows + totRow;
+
+    // Extra panels
+    renderHoaVon(names, tot);
+    renderStats(names, tot);
+    renderSettlement(names, tot);
 }
 
 function delVan(idx) {
+    SFX.play('click');
     showConfirm({
         icon: '🗑️', title: 'Xóa ván?',
         msg: `Bạn có chắc muốn xóa ván ${idx + 1} không?\nHành động này không thể hoàn tác.`,
         yesDanger: true,
         onYes: () => {
+            SFX.play('del');
             history.splice(idx, 1); save();
             if (!history.length) document.getElementById('board-wrap').style.display = 'none';
             else renderBoard();
@@ -629,12 +934,20 @@ function delVan(idx) {
 function resetGame() {
     showConfirm({
         icon: '🔄', title: 'Ván mới?',
-        msg: 'Xóa toàn bộ lịch sử ván chơi và bắt đầu lại?',
-        yesDanger: true,
+        msg: 'Lưu buổi hiện tại và bắt đầu ván mới?',
+        yesDanger: false,
         onYes: () => {
-            history = []; save();
+            // Tự động lưu buổi hiện tại trước khi reset
+            if (history.length) {
+                saveSession();
+            }
+            currentSessionId = null;
+            history = []; undoSnapshot = null; vanNotes = {}; save();
+            resetTimer();
             document.getElementById('board-wrap').style.display = 'none';
             document.getElementById('van-num').textContent = 'Nhập ván 1';
+            const undoBtn = document.getElementById('undo-btn');
+            if (undoBtn) undoBtn.style.display = 'none';
             renderGrid(); renderXamPickers(); setMode('normal');
         },
     });
@@ -754,6 +1067,34 @@ function exportXLSX() {
     ws3['!cols'] = [{ wch: 28 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws3, 'Luật chơi');
 
+    // Sheet 4: Thanh toán cuối buổi
+    const balances = tot.map((t, i) => ({ i, bal: t }));
+    const creditors = balances.filter(b => b.bal > 0).sort((a, b) => b.bal - a.bal);
+    const debtors = balances.filter(b => b.bal < 0).sort((a, b) => a.bal - b.bal);
+    const txns = [];
+    const cred = creditors.map(c => ({ ...c }));
+    const debt = debtors.map(d => ({ ...d }));
+    let ci = 0, di = 0;
+    while (ci < cred.length && di < debt.length) {
+        const amount = Math.min(cred[ci].bal, -debt[di].bal);
+        if (amount > 0) txns.push({ from: debt[di].i, to: cred[ci].i, amount });
+        cred[ci].bal -= amount; debt[di].bal += amount;
+        if (Math.abs(cred[ci].bal) < 0.01) ci++;
+        if (Math.abs(debt[di].bal) < 0.01) di++;
+    }
+    const settRows = [['Người trả', 'Người nhận', 'Số tiền (đ)']];
+    if (txns.length) {
+        txns.forEach(t => {
+            const amt = Number.isInteger(t.amount) ? t.amount : parseFloat(t.amount.toFixed(1));
+            settRows.push([names[t.from], names[t.to], amt]);
+        });
+    } else {
+        settRows.push(['—', 'Tất cả huề, không ai nợ ai!', '']);
+    }
+    const ws4 = XLSX.utils.aoa_to_sheet(settRows);
+    ws4['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws4, 'Thanh toán');
+
     const date = new Date().toLocaleDateString('vi-VN').replace(/\//g, '-');
     XLSX.writeFile(wb, `XamLoc_${date}.xlsx`);
 }
@@ -864,16 +1205,30 @@ function clearHistory() {
 }
 
 function clearAll() {
-    showConfirm({
-        icon: '⚠️', title: 'Xóa tất cả?',
-        msg: 'Xóa TẤT CẢ dữ liệu bao gồm lịch sử, luật chơi và tên người chơi?\nHành động này không thể hoàn tác!',
-        yesDanger: true,
-        onYes: () => {
-            localStorage.removeItem(LS_RULES);
-            localStorage.removeItem(LS_HISTORY);
-            localStorage.removeItem(LS_PLAYERS);
-            location.reload();
-        },
+    showModal({
+        icon: '☢️',
+        title: 'Xóa toàn bộ dữ liệu?',
+        msg: '⚠️ Hành động này sẽ xóa VĨNH VIỄN:\n\n• Toàn bộ lịch sử ván chơi\n• Tất cả buổi chơi đã lưu\n• Tên người chơi & preset\n• Luật chơi tùy chỉnh\n• Cài đặt âm thanh & giao diện\n\nKhông thể hoàn tác. Ứng dụng sẽ về trạng thái mặc định hoàn toàn.',
+        buttons: [
+            { label: 'Hủy', cls: 'modal-btn-cancel' },
+            {
+                label: 'Tôi hiểu, xóa hết',
+                cls: 'modal-btn-danger',
+                cb: () => {
+                    showConfirm({
+                        icon: '🚨',
+                        title: 'Xác nhận lần cuối',
+                        msg: 'Chắc chắn xóa toàn bộ? Mọi dữ liệu sẽ mất hoàn toàn.',
+                        yesDanger: true,
+                        onYes: () => {
+                            localStorage.clear();
+                            localStorage.setItem('xamloc_theme', 'light');
+                            location.reload();
+                        },
+                    });
+                },
+            },
+        ],
     });
 }
 
@@ -885,9 +1240,489 @@ function setActivePBtn() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// TÍNH TIỀN CUỐI BUỔI (Settlement)
+// ══════════════════════════════════════════════════════════════
+function renderSettlement(names, tot) {
+    const wrap = document.getElementById('settlement-wrap');
+    if (!wrap) return;
+    if (!history.length) { wrap.innerHTML = ''; return; }
+
+    // Tính ai trả ai bao nhiêu (min-transactions)
+    const balances = tot.map((t, i) => ({ i, bal: t }));
+    const creditors = balances.filter(b => b.bal > 0).sort((a, b) => b.bal - a.bal);
+    const debtors = balances.filter(b => b.bal < 0).sort((a, b) => a.bal - b.bal);
+
+    const txns = [];
+    const cred = creditors.map(c => ({ ...c }));
+    const debt = debtors.map(d => ({ ...d }));
+    let ci = 0, di = 0;
+    while (ci < cred.length && di < debt.length) {
+        const amount = Math.min(cred[ci].bal, -debt[di].bal);
+        if (amount > 0) {
+            txns.push({ from: debt[di].i, to: cred[ci].i, amount });
+        }
+        cred[ci].bal -= amount;
+        debt[di].bal += amount;
+        if (Math.abs(cred[ci].bal) < 0.01) ci++;
+        if (Math.abs(debt[di].bal) < 0.01) di++;
+    }
+
+    if (!txns.length) {
+        wrap.innerHTML = `<div class="settlement-wrap"><div class="settlement-title">💰 Thanh toán cuối buổi</div><div class="settlement-zero">🎉 Tất cả huề — không ai nợ ai!</div></div>`;
+        return;
+    }
+
+    let html = `<div class="settlement-wrap">
+    <div class="settlement-title">💰 Thanh toán cuối buổi</div>
+    <div class="settlement-list">`;
+    txns.forEach(t => {
+        const display = Number.isInteger(t.amount) ? t.amount : t.amount.toFixed(1).replace(/\.0$/, '');
+        html += `<div class="settlement-row">
+      <span class="sett-from">${names[t.from]}</span>
+      <span class="sett-arrow">→</span>
+      <span class="sett-to">${names[t.to]}</span>
+      <span class="sett-amt">${display}đ</span>
+    </div>`;
+    });
+    html += `</div>
+    <button class="share-btn" onclick="shareResult()">📤 Chia sẻ kết quả</button>
+    </div>`;
+    wrap.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════════
+// GHI CHÚ VÁN
+// ══════════════════════════════════════════════════════════════
+function editVanNote(vi) {
+    SFX.play('click');
+    const current = vanNotes[vi] || '';
+    // Use a custom input modal
+    showInputModal({
+        icon: '📝',
+        title: `Ghi chú ván ${vi + 1}`,
+        placeholder: 'VD: ván này thằng A may vãi, sâm căng nhất...',
+        value: current,
+        onOk: (val) => {
+            if (val.trim()) {
+                vanNotes[vi] = val.trim();
+            } else {
+                delete vanNotes[vi];
+            }
+            save();
+            renderBoard();
+            SFX.play('save');
+        }
+    });
+}
+
+function showInputModal({ icon = '✏️', title, placeholder = '', value = '', onOk }) {
+    document.getElementById('modal-icon').textContent = icon;
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-msg').textContent = '';
+    const acts = document.getElementById('modal-actions');
+    acts.innerHTML = `
+      <textarea id="modal-input" rows="3" placeholder="${placeholder}" style="width:100%;padding:10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--surface2);color:var(--text);font-size:14px;resize:vertical;margin-bottom:10px;font-family:inherit;">${value}</textarea>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="modal-btn modal-btn-cancel" id="modal-cancel-btn">Hủy</button>
+        <button class="modal-btn modal-btn-primary" id="modal-ok-btn">Lưu</button>
+      </div>`;
+    document.getElementById('modal-cancel-btn').onclick = () => closeModal();
+    document.getElementById('modal-ok-btn').onclick = () => {
+        const val = document.getElementById('modal-input').value;
+        closeModal();
+        if (onOk) onOk(val);
+    };
+    const ov = document.getElementById('modal-overlay');
+    ov.style.display = 'flex';
+    requestAnimationFrame(() => {
+        ov.classList.add('show');
+        document.getElementById('modal-input').focus();
+    });
+}
+
+// ══════════════════════════════════════════════════════════════
+// LƯU NHIỀU BUỔI
+// ══════════════════════════════════════════════════════════════
+function saveSession() {
+    if (!history.length) { showAlert({ icon: '📋', title: 'Chưa có dữ liệu', msg: 'Chưa có ván nào để lưu buổi!' }); return; }
+    const names = history[history.length - 1].names;
+    const tot = new Array(numP).fill(0);
+    history.forEach(v => v.scores.forEach((s, i) => tot[i] += s));
+    const label = new Date().toLocaleDateString('vi-VN', { weekday: 'short', day: 'numeric', month: 'numeric' });
+    if (!currentSessionId) currentSessionId = Date.now();
+    const session = {
+        id: currentSessionId,
+        date: new Date().toISOString(),
+        label,
+        numP,
+        names: [...names],
+        history: JSON.parse(JSON.stringify(history)),
+        notes: JSON.parse(JSON.stringify(vanNotes)),
+        rules: { ...rules },
+        tot: [...tot],
+        // autoSaved flag xóa đi — buổi này đã được lưu chính thức
+    };
+    const idx = sessions.findIndex(s => s.id === currentSessionId);
+    if (idx >= 0) {
+        sessions[idx] = session;
+    } else {
+        sessions.unshift(session);
+        if (sessions.length > 50) sessions = sessions.slice(0, 50);
+    }
+    try {
+        localStorage.setItem(LS_SESSIONS, JSON.stringify(sessions));
+    } catch (e) { console.warn('sessions save error', e); }
+    SFX.play('save');
+    showToast(`💾 Đã lưu buổi ${label}!`, 2500);
+    renderSessionsList();
+}
+
+// Tự động lưu/cập nhật buổi hiện tại vào sessions (upsert)
+function autoSaveSession() {
+    if (!history.length) return;
+    const names = history[history.length - 1].names;
+    const tot = new Array(numP).fill(0);
+    history.forEach(v => v.scores.forEach((s, i) => tot[i] += s));
+    const label = new Date().toLocaleDateString('vi-VN', { weekday: 'short', day: 'numeric', month: 'numeric' });
+
+    if (!currentSessionId) currentSessionId = Date.now();
+
+    const session = {
+        id: currentSessionId,
+        date: new Date().toISOString(),
+        label,
+        numP,
+        names: [...names],
+        history: JSON.parse(JSON.stringify(history)),
+        notes: JSON.parse(JSON.stringify(vanNotes)),
+        rules: { ...rules },
+        tot: [...tot],
+        autoSaved: true,
+    };
+
+    // Upsert: thay thế nếu đã có, thêm mới nếu chưa
+    const idx = sessions.findIndex(s => s.id === currentSessionId);
+    if (idx >= 0) {
+        sessions[idx] = session;
+    } else {
+        sessions.unshift(session);
+        if (sessions.length > 50) sessions = sessions.slice(0, 50);
+    }
+
+    try {
+        localStorage.setItem(LS_SESSIONS, JSON.stringify(sessions));
+    } catch (e) { console.warn('autoSaveSession error', e); }
+}
+
+function renderSessionsList() {
+    const wrap = document.getElementById('sessions-list');
+    if (!wrap) return;
+    if (!sessions.length) {
+        wrap.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:16px;">Chưa có buổi nào được lưu</div>';
+        return;
+    }
+    wrap.innerHTML = sessions.map((s, si) => {
+        const winner = s.names[s.tot.indexOf(Math.max(...s.tot))];
+        const totStr = s.tot.map((t, i) => `${s.names[i]}: ${t > 0 ? '+' : ''}${t}`).join(', ');
+        const liveBadge = s.autoSaved ? ' <span style="font-size:10px;background:var(--green);color:#fff;padding:1px 5px;border-radius:6px;vertical-align:middle;">đang chơi</span>' : '';
+        return `<div class="session-row">
+      <div class="session-info">
+        <div class="session-label">📅 ${s.label}${liveBadge} · ${s.history.length} ván · ${s.numP} người</div>
+        <div class="session-sub">🏆 ${winner} thắng · ${totStr}</div>
+      </div>
+      <div class="session-actions">
+        <button class="sec-btn" onclick="loadSession(${si})">Xem lại</button>
+        <button class="sec-btn danger" onclick="deleteSession(${si})">🗑</button>
+      </div>
+    </div>`;
+    }).join('');
+}
+
+function loadSession(si) {
+    showSessionViewer(sessions[si]);
+}
+
+function showSessionViewer(s) {
+    const tot = s.tot;
+    const names = s.names;
+    const order = [...Array(s.numP).keys()].sort((a, b) => tot[b] - tot[a]);
+
+    let html = `<div style="max-height:70vh;overflow-y:auto;padding:4px;">
+    <div style="font-size:15px;font-weight:700;margin-bottom:12px;">📅 ${s.label} — ${s.history.length} ván</div>
+    <div style="margin-bottom:10px;">`;
+    order.forEach((pi, rank) => {
+        const t = tot[pi];
+        html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+      <span>${rank === 0 ? '🏆' : '#' + (rank + 1)} ${names[pi]}</span>
+      <span class="${t >= 0 ? 'pos' : 'neg'}" style="font-weight:700;">${t > 0 ? '+' : ''}${t}</span>
+    </div>`;
+    });
+    html += `</div>`;
+
+    // Settlement
+    const creditors = order.filter(i => tot[i] > 0).map(i => ({ i, bal: tot[i] }));
+    const debtors = order.filter(i => tot[i] < 0).map(i => ({ i, bal: tot[i] }));
+    const txns = [];
+    const cred = creditors.map(c => ({ ...c }));
+    const debt = debtors.map(d => ({ ...d }));
+    let ci = 0, di = 0;
+    while (ci < cred.length && di < debt.length) {
+        const amount = Math.min(cred[ci].bal, -debt[di].bal);
+        if (amount > 0.01) txns.push({ from: debt[di].i, to: cred[ci].i, amount });
+        cred[ci].bal -= amount; debt[di].bal += amount;
+        if (Math.abs(cred[ci].bal) < 0.01) ci++;
+        if (Math.abs(debt[di].bal) < 0.01) di++;
+    }
+    if (txns.length) {
+        html += `<div style="margin-top:10px;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;">💰 Thanh toán</div>`;
+        txns.forEach(t => {
+            html += `<div style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:14px;">
+        <span style="color:var(--red)">${names[t.from]}</span>
+        <span>→</span>
+        <span style="color:var(--green)">${names[t.to]}</span>
+        <span style="margin-left:auto;font-weight:700;">${Number.isInteger(t.amount) ? t.amount : t.amount.toFixed(1).replace(/\.0$/, "")}đ</span>
+      </div>`;
+        });
+    }
+    html += `</div>`;
+
+    // Hiển thị modal trực tiếp, không qua showModal (để dùng innerHTML)
+    document.getElementById('modal-icon').textContent = '📅';
+    document.getElementById('modal-title').textContent = 'Xem buổi chơi';
+    document.getElementById('modal-msg').innerHTML = html;
+    const acts = document.getElementById('modal-actions');
+    acts.innerHTML = '';
+    const btn = document.createElement('button');
+    btn.className = 'modal-btn modal-btn-primary';
+    btn.textContent = 'Đóng';
+    btn.onclick = () => closeModal();
+    acts.appendChild(btn);
+    const ov = document.getElementById('modal-overlay');
+    ov.style.display = 'flex';
+    requestAnimationFrame(() => ov.classList.add('show'));
+}
+
+function deleteSession(si) {
+    showConfirm({
+        icon: '🗑️', title: 'Xóa buổi chơi?',
+        msg: `Xóa buổi "${sessions[si].label}"?`,
+        yesDanger: true,
+        onYes: () => {
+            sessions.splice(si, 1);
+            localStorage.setItem(LS_SESSIONS, JSON.stringify(sessions));
+            renderSessionsList();
+            showToast('🗑 Đã xóa buổi chơi', 1500);
+        }
+    });
+}
+
+// ══════════════════════════════════════════════════════════════
+// TÊN NGƯỜI CHƠI HAY DÙNG (Presets)
+// ══════════════════════════════════════════════════════════════
+function addPreset(name) {
+    name = name.trim();
+    if (!name || playerPresets.includes(name)) return;
+    playerPresets.push(name);
+    if (playerPresets.length > 20) playerPresets = playerPresets.slice(-20);
+    save();
+}
+
+function autoAddCurrentNamesToPresets() {
+    getNames().forEach(n => {
+        if (n && !n.startsWith('Người ')) addPreset(n);
+    });
+}
+
+function renderPresetChips() {
+    const wrap = document.getElementById('preset-chips');
+    if (!wrap) return;
+    if (!playerPresets.length) {
+        wrap.innerHTML = '<span style="color:var(--muted);font-size:12px;">Chưa có tên nào được lưu</span>';
+        return;
+    }
+    wrap.innerHTML = playerPresets.map((n, i) =>
+        `<div class="preset-chip">
+      <span onclick="applyPreset('${n.replace(/'/g, "\\'")}', event)">${n}</span>
+      <button onclick="removePreset(${i})" class="preset-del">✕</button>
+    </div>`
+    ).join('');
+}
+
+function applyPreset(name, e) {
+    SFX.play('pick');
+    // Find first empty/default slot
+    for (let i = 0; i < numP; i++) {
+        const el = document.getElementById('pn' + i);
+        if (!el) continue;
+        const v = el.value.trim();
+        if (!v || v.startsWith('Người ')) {
+            el.value = name;
+            pnames[i] = name;
+            save(); renderXamPickers(); renderGrid();
+            showToast(`✅ Điền "${name}" vào ô trống`, 1200);
+            return;
+        }
+    }
+    showToast('⚠️ Tất cả ô tên đã được điền!', 1500);
+}
+
+function removePreset(i) {
+    playerPresets.splice(i, 1);
+    save();
+    renderPresetChips();
+}
+
+function openPresetsManager() {
+    renderPresetChips();
+    const el = document.getElementById('presets-panel');
+    if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function saveNewPreset() {
+    const inp = document.getElementById('preset-input');
+    if (!inp) return;
+    const name = inp.value.trim();
+    if (!name) return;
+    addPreset(name);
+    inp.value = '';
+    renderPresetChips();
+    SFX.play('save');
+    showToast(`✅ Đã thêm "${name}"`, 1200);
+}
+
+// ══════════════════════════════════════════════════════════════
+// BẢNG DANH DỰ CÁ NHÂN
+// ══════════════════════════════════════════════════════════════
+function buildPersonalHonor() {
+    if (!sessions.length && !history.length) return '<div style="color:var(--muted);text-align:center;padding:16px;font-size:13px;">Cần ít nhất 1 buổi đã lưu để xem bảng danh dự.</div>';
+
+    // Aggregate across sessions + current
+    const allSessions = [...sessions];
+    if (history.length) {
+        const names = history[history.length - 1].names;
+        const tot = new Array(numP).fill(0);
+        history.forEach(v => v.scores.forEach((s, i) => tot[i] += s));
+        allSessions.unshift({ names, history: JSON.parse(JSON.stringify(history)), tot, numP, rules });
+    }
+
+    const players = {};
+    allSessions.forEach(s => {
+        s.names.slice(0, s.numP).forEach((name, pi) => {
+            if (!players[name]) players[name] = { name, sessions: 0, wins: 0, xam: 0, chay: 0, bigWin: 0, bigLoss: 0, totalScore: 0 };
+            const p = players[name];
+            p.sessions++;
+            p.totalScore += s.tot[pi];
+            s.history.forEach(v => {
+                const sc = v.scores[pi] || 0;
+                const tags = v.tags[pi] || [];
+                const maxSc = Math.max(...v.scores.slice(0, s.numP));
+                if (sc === maxSc && sc > 0) p.wins++;
+                if (sc > p.bigWin) p.bigWin = sc;
+                if (sc < p.bigLoss) p.bigLoss = sc;
+                tags.forEach(t => {
+                    const tag = typeof t === 'string' ? t : t.tag;
+                    if (tag === 'X') p.xam++;
+                    if (tag === 'C') p.chay++;
+                });
+            });
+        });
+    });
+
+    const pArr = Object.values(players).sort((a, b) => b.totalScore - a.totalScore);
+    if (!pArr.length) return '<div style="color:var(--muted);text-align:center;padding:16px;font-size:13px;">Chưa có dữ liệu.</div>';
+
+    let html = `<div class="honor-grid">`;
+    pArr.forEach((p, rank) => {
+        const rankIcon = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `#${rank + 1}`;
+        html += `<div class="honor-card">
+      <div class="honor-rank">${rankIcon}</div>
+      <div class="honor-name">${p.name}</div>
+      <div class="honor-score ${p.totalScore >= 0 ? 'pos' : 'neg'}">${p.totalScore >= 0 ? '+' : ''}${p.totalScore}đ tổng</div>
+      <div class="honor-stats">
+        <span>🏆 ${p.wins} ván thắng</span>
+        <span>🎯 ${p.xam} sâm</span>
+        <span>⚡ ${p.chay} cháy</span>
+        <span>💰 +${p.bigWin}đ lớn nhất</span>
+        ${p.bigLoss < 0 ? `<span>💸 ${p.bigLoss}đ thua nhất</span>` : ''}
+        <span>📅 ${p.sessions} buổi</span>
+      </div>
+    </div>`;
+    });
+    html += `</div>`;
+    return html;
+}
+
+function renderHonorBoard() {
+    const wrap = document.getElementById('honor-content');
+    if (wrap) wrap.innerHTML = buildPersonalHonor();
+}
+
+// ══════════════════════════════════════════════════════════════
+// CHIA SẺ KẾT QUẢ
+// ══════════════════════════════════════════════════════════════
+function shareResult() {
+    if (!history.length) return;
+    const names = history[history.length - 1].names;
+    const tot = new Array(numP).fill(0);
+    history.forEach(v => v.scores.forEach((s, i) => tot[i] += s));
+    const order = [...Array(numP).keys()].sort((a, b) => tot[b] - tot[a]);
+
+    const date = new Date().toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric', year: 'numeric' });
+    let txt = `🃏 Sâm Lốc — ${date}\n`;
+    txt += `📊 Kết quả sau ${history.length} ván:\n`;
+    txt += `${'─'.repeat(26)}\n`;
+    order.forEach((pi, rank) => {
+        const t = tot[pi];
+        const medal = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `#${rank + 1}`;
+        txt += `${medal} ${names[pi]}: ${t >= 0 ? '+' : ''}${t}đ\n`;
+    });
+    txt += `${'─'.repeat(26)}\n`;
+
+    // Settlement
+    const creditors = order.filter(i => tot[i] > 0).map(i => ({ i, bal: tot[i] }));
+    const debtors = order.filter(i => tot[i] < 0).map(i => ({ i, bal: tot[i] }));
+    const txns = [];
+    const cred = creditors.map(c => ({ ...c }));
+    const debt = debtors.map(d => ({ ...d }));
+    let ci = 0, di = 0;
+    while (ci < cred.length && di < debt.length) {
+        const amount = Math.min(cred[ci].bal, -debt[di].bal);
+        if (amount > 0.01) txns.push({ from: debt[di].i, to: cred[ci].i, amount });
+        cred[ci].bal -= amount; debt[di].bal += amount;
+        if (Math.abs(cred[ci].bal) < 0.01) ci++;
+        if (Math.abs(debt[di].bal) < 0.01) di++;
+    }
+    if (txns.length) {
+        txt += `💰 Thanh toán:\n`;
+        txns.forEach(t => { txt += `  ${names[t.from]} → ${names[t.to]}: ${Number.isInteger(t.amount) ? t.amount : t.amount.toFixed(1).replace(/\.0$/, "")}đ\n`; });
+    }
+
+    if (navigator.share) {
+        navigator.share({ text: txt }).catch(() => copyToClipboard(txt));
+    } else {
+        copyToClipboard(txt);
+    }
+}
+
+function copyToClipboard(txt) {
+    navigator.clipboard.writeText(txt).then(() => {
+        showToast('📋 Đã copy kết quả!', 2000);
+    }).catch(() => {
+        showModal({
+            icon: '📤', title: 'Chia sẻ kết quả',
+            msg: txt,
+            buttons: [{ label: 'Đóng', cls: 'modal-btn-primary' }]
+        });
+    });
+}
+
+// ══════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════
 (function init() {
+    // Init sound engine
+    if (typeof SFX !== 'undefined') SFX.init();
+
     // Apply saved theme
     const savedTheme = localStorage.getItem(LS_THEME);
     if (savedTheme) applyTheme(savedTheme);
@@ -905,4 +1740,8 @@ function setActivePBtn() {
         document.getElementById('board-wrap').style.display = 'block';
         document.getElementById('van-num').textContent = `Nhập ván ${history.length + 1}`;
     }
+    // New features init
+    renderSessionsList();
+    renderPresetChips();
+    renderHonorBoard();
 })();
