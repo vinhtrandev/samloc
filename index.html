@@ -5,12 +5,52 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sâm Lốc — Tính Điểm</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 
 <body>
+
+    <!-- ═══════════════════════════════
+       INTRO / SPLASH SCREEN
+  ═══════════════════════════════ -->
+    <div id="intro-splash" role="status" aria-label="Đang tải">
+        <div class="intro-card-fan">
+            <div class="intro-card c1"><span class="ic-suit ic-black">♠</span></div>
+            <div class="intro-card c2"><span class="ic-suit ic-red">♥</span></div>
+            <div class="intro-card c3"><span class="ic-suit ic-red">♦</span></div>
+            <div class="intro-card c4"><span class="ic-suit ic-black">♣</span></div>
+            <div class="intro-card c5 back"></div>
+        </div>
+        <div class="intro-title">
+            <span class="intro-suit-mark">♦</span><span>Sâm</span>&nbsp;Lốc<span class="intro-suit-mark">♣</span>
+        </div>
+        <div class="intro-subtitle">Tool tính điểm</div>
+        <div class="intro-loadbar"><div class="intro-loadbar-fill"></div></div>
+    </div>
+    <script>
+        (function () {
+            var MIN_MS = 3600;
+            var start = Date.now();
+            var splash = document.getElementById('intro-splash');
+            document.documentElement.classList.add('intro-lock');
+            function hide() {
+                var elapsed = Date.now() - start;
+                var wait = Math.max(0, MIN_MS - elapsed);
+                setTimeout(function () {
+                    splash.classList.add('intro-hide');
+                    document.documentElement.classList.remove('intro-lock');
+                    setTimeout(function () { splash.remove(); }, 650);
+                }, wait);
+            }
+            if (document.readyState === 'complete') hide();
+            else window.addEventListener('load', hide);
+        })();
+    </script>
 
     <div class="app">
 
@@ -19,7 +59,7 @@
   ═══════════════════════════════ -->
         <div class="header">
             <div style="display:flex;flex-direction:column;gap:2px;">
-                <div class="header-title"><span>Sâm</span> Lốc</div>
+                <div class="header-title"><span class="suit-mark">♦</span><span>Sâm</span> Lốc<span class="suit-mark">♣</span></div>
                 <div
                     style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;">
                     Tool tính điểm</div>
@@ -350,17 +390,17 @@
      NOTICE MODAL (first-run)
 ═══════════════════════════════ -->
     <div id="notice-overlay"
-        style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px;">
+        style="position:fixed;inset:0;background:rgba(14,20,12,.55);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px;">
         <div
-            style="background:#fff;border-radius:14px;padding:28px 24px;max-width:360px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.18);text-align:center;">
-            <div style="font-size:32px;margin-bottom:12px;">⚙️</div>
-            <div style="font-size:17px;font-weight:700;margin-bottom:8px;color:#1a1a18;" class="modal-title-notice">Lưu
+            style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px 24px;max-width:360px;width:100%;box-shadow:0 12px 40px rgba(14,20,12,.28);text-align:center;">
+            <div style="font-size:32px;margin-bottom:12px;">🃏</div>
+            <div style="font-size:18px;font-weight:700;margin-bottom:8px;color:var(--text);font-family:'Fraunces','Be Vietnam Pro',serif;" class="modal-title-notice">Lưu
                 ý trước khi chơi</div>
-            <div style="font-size:14px;color:#888780;line-height:1.7;margin-bottom:20px;">
-                Nhớ vào <b style="color:#2563eb;">⚙️ Luật chơi</b> để chỉnh luật cho đúng trước khi bắt đầu nhé!
+            <div style="font-size:14px;color:var(--muted);line-height:1.7;margin-bottom:20px;">
+                Nhớ vào <b style="color:var(--accent);">⚙️ Luật chơi</b> để chỉnh luật cho đúng trước khi bắt đầu nhé!
             </div>
             <button onclick="document.getElementById('notice-overlay').style.display='none'"
-                style="width:100%;padding:11px;font-size:14px;font-weight:700;cursor:pointer;border-radius:10px;background:#2563eb;color:#fff;border:none;">
+                style="width:100%;padding:12px;font-size:14px;font-weight:700;cursor:pointer;border-radius:10px;background:var(--accent);color:#fff;border:none;">
                 Đã hiểu, bắt đầu thôi!
             </button>
         </div>

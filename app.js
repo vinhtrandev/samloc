@@ -12,8 +12,8 @@ const LS_PRESETS = 'xamloc_presets';
 const LS_NOTES = 'xamloc_notes'; // per-van notes: { [vanIdx]: string }
 
 // ── Badge maps ─────────────────────────────────────────────────
-const TMAP = { X: 'bx', Q: 'bq', Qbat: 'bc', C: 'bc', Chan: 'bchan', Xchan: 'bc', DL: 'bdl', DLnhan: 'bdlnhan' };
-const TLBL = { X: 'Sâm ✓', Q: 'T.quý 🔥', Qbat: 'Bị bắt 🔥', C: 'Cháy', Chan: 'Chặn 🛡', Xchan: 'Bị chặn', DL: 'Đền làng 🏘️', DLnhan: 'Được đền 🏘️' };
+const TMAP = { X: 'bx', Q: 'bq', Qbat: 'bc', Qsafe: 'bchan', C: 'bc', Chan: 'bchan', Xchan: 'bc', DL: 'bdl', DLnhan: 'bdlnhan' };
+const TLBL = { X: 'Sâm ✓', Q: 'T.quý 🔥', Qbat: 'Bị bắt 🔥', Qsafe: 'Thoát 🔥', C: 'Cháy', Chan: 'Chặn 🛡', Xchan: 'Bị chặn', DL: 'Đền làng 🏘️', DLnhan: 'Được đền 🏘️' };
 
 // ── State ──────────────────────────────────────────────────────
 let rules = { la: 0.5, xw: 10, xl: 30, tq: 5, tqOn: true, chay: 10, chayOn: true };
@@ -21,7 +21,7 @@ let history = [];
 let numP = 4;
 let pnames = ['Người 1', 'Người 2', 'Người 3', 'Người 4'];
 let mode = 'normal';
-let selXam = -1, selChan = -1, selTqDanh = -1, selTqBat = -1, selChay = [], selWin = -1, selDenLang = -1;
+let selXam = -1, selChan = -1, selTqChain = [], selChay = [], selWin = -1, selDenLang = -1;
 
 // ── Sessions & extras ─────────────────────────────────────────
 let sessions = []; // [{id, date, label, history, names, numP, rules, tot}]
@@ -307,7 +307,7 @@ function setPlayers(n) {
         document.getElementById(id).className =
             'btn-outline' + (parseInt(id.replace('pbtn', '')) === n ? ' active' : '');
     });
-    selXam = -1; selChan = -1; selTqDanh = -1; selTqBat = -1; selChay = []; selWin = -1; selDenLang = -1;
+    selXam = -1; selChan = -1; selTqChain = []; selChay = []; selWin = -1; selDenLang = -1;
     renderNames(); renderGrid(); renderXamPickers(); save();
 }
 
@@ -414,21 +414,45 @@ function renderBonusPickers() {
     let html = '';
 
     if (rules.tqOn) {
-        const danhBtns = names.slice(0, numP).map((n, i) =>
-            `<button class="picker-btn${selTqDanh === i ? ' sel-tq' : ''}" onclick="pickTqDanh(${i})">${n}</button>`).join('');
-        const batBtns = names.slice(0, numP).map((n, i) =>
-            i === selTqDanh ? '' :
-                `<button class="picker-btn${selTqBat === i ? ' sel-chan' : ''}" onclick="pickTqBat(${i})">${n}</button>`).join('');
+        const n = selTqChain.length;
+        const btns = names.slice(0, numP).map((nm, i) => {
+            const pos = selTqChain.indexOf(i);
+            let cls = 'picker-btn';
+            let badge = '';
+            if (pos !== -1) {
+                if (pos === n - 1) cls += ' sel-tq';
+                else if (pos === n - 2) cls += ' sel-chay';
+                else cls += ' sel-chan';
+                badge = `<span class="tq-badge">${pos + 1}</span>`;
+            }
+            return `<button class="${cls}" onclick="pickTq(${i})">${badge}${nm}</button>`;
+        }).join('');
+
+        let flowHtml = '';
+        if (n >= 2) {
+            const debtAmt = rules.tq * (n - 1);
+            const parts = selTqChain.map((pi, k) => {
+                if (k === n - 1) {
+                    return `<span class="tq-flow-win">🔥 ${names[pi]} <b>+${debtAmt}đ</b></span>`;
+                } else if (k === n - 2) {
+                    return `<span class="tq-flow-lose">${names[pi]} <b>-${debtAmt}đ</b></span>`;
+                } else {
+                    return `<span class="tq-flow-safe">${names[pi]} <b>thoát</b></span>`;
+                }
+            });
+            flowHtml = `<div class="tq-flow">${parts.join('<span class="tq-arrow">→</span>')}</div>`;
+        }
+
         html += `<div class="bonus-block tq-block">
-      <div class="tq-half">
-        <div class="bonus-label">🔥 Người đánh tứ quý <span style="color:var(--green);font-size:11px;">+${rules.tq}đ</span></div>
-        <div class="picker-grid">${danhBtns}</div>
+      <div class="tq-half" style="padding-bottom:2px;">
+        <div class="bonus-label" style="margin-bottom:2px;">🔥 Tứ quý — bắt chồng</div>
+        <div class="hint-text" style="margin-bottom:8px;">Bấm lần lượt: người đánh trước → người bắt → người bắt tiếp theo... Người bị bắt <b>gần nhất</b> sẽ gánh hết (cộng dồn thêm 1×tứ quý mỗi lượt bắt), người bắt trước đó coi như thoát.</div>
+        <div class="picker-grid">${btns}</div>
       </div>
-      <div class="tq-divider"><span>bắt</span></div>
-      <div class="tq-half">
-        <div class="bonus-label">💥 Người bị bắt <span style="color:var(--red);font-size:11px;">-${rules.tq}đ</span></div>
-        <div class="picker-grid">${batBtns || '<span class="tq-placeholder">← Chọn người đánh trước</span>'}</div>
-      </div>
+      ${flowHtml
+                ? `<div class="tq-half" style="padding-top:0;">${flowHtml}</div>`
+                : `<div class="tq-half" style="padding-top:0;"><span class="tq-placeholder">Chọn ít nhất 2 người: người đánh trước, người bắt sau</span></div>`}
+      ${n > 0 ? `<div class="tq-half" style="padding-top:0;"><button type="button" class="sec-btn" style="padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();selTqChain=[];renderBonusPickers();">↺ Xóa lượt chọn</button></div>` : ''}
     </div>`;
     }
 
@@ -469,8 +493,19 @@ function pickXam(i) {
     renderXamPickers();
 }
 function pickChan(i) { SFX.play('pick'); selChan = (selChan === i) ? -1 : i; renderXamPickers(); }
-function pickTqDanh(i) { SFX.play('pick'); selTqDanh = (selTqDanh === i) ? -1 : i; if (selTqBat === i) selTqBat = -1; renderBonusPickers(); }
-function pickTqBat(i) { SFX.play('tuquy'); selTqBat = (selTqBat === i) ? -1 : i; renderBonusPickers(); }
+function pickTq(i) {
+    const pos = selTqChain.indexOf(i);
+    if (pos !== -1) {
+        // Bấm lại người đã chọn: bỏ người đó và tất cả người bắt sau đó (cắt chuỗi)
+        selTqChain = selTqChain.slice(0, pos);
+        SFX.play('pick');
+    } else {
+        if (selTqChain.length >= numP) return;
+        selTqChain.push(i);
+        SFX.play(selTqChain.length >= 2 ? 'tuquy' : 'pick');
+    }
+    renderBonusPickers();
+}
 
 function toggleChan() {
     const tc = document.getElementById('xam-tc').checked;
@@ -576,15 +611,22 @@ function addVan() {
                 tags[i].push({ tag: 'C', delta: -(rules.chay * rules.la) });
         }
 
-        // Tứ quý validation
+        // Tứ quý validation (hỗ trợ bắt chồng — người bị bắt gần nhất gánh hết, người trước đó thoát)
         if (rules.tqOn) {
-            if (selTqDanh !== -1 && selTqBat === -1) { showAlert({ icon: '🔥', title: 'Chưa chọn đủ', msg: 'Đã chọn người đánh tứ quý, cần chọn thêm người bị bắt!' }); return false; }
-            if (selTqBat !== -1 && selTqDanh === -1) { showAlert({ icon: '🔥', title: 'Chưa chọn đủ', msg: 'Đã chọn người bị bắt, cần chọn thêm người đánh tứ quý!' }); return false; }
-            if (selTqDanh !== -1 && selTqBat !== -1) {
-                sc[selTqDanh] += rules.tq; scBonus[selTqDanh] += rules.tq;
-                sc[selTqBat] -= rules.tq; scBonus[selTqBat] -= rules.tq;
-                tags[selTqDanh].push({ tag: 'Q', delta: +rules.tq });
-                tags[selTqBat].push({ tag: 'Qbat', delta: -rules.tq });
+            if (selTqChain.length === 1) { showAlert({ icon: '🔥', title: 'Chưa chọn đủ', msg: 'Đã chọn người đánh tứ quý, cần chọn thêm người bắt!' }); return false; }
+            if (selTqChain.length >= 2) {
+                const n = selTqChain.length;
+                const debtAmt = rules.tq * (n - 1);
+                const loserIdx = selTqChain[n - 2];
+                const winnerIdx = selTqChain[n - 1];
+
+                for (let k = 0; k < n - 2; k++) {
+                    tags[selTqChain[k]].push({ tag: 'Qsafe', delta: 0 });
+                }
+                sc[loserIdx] -= debtAmt; scBonus[loserIdx] -= debtAmt;
+                tags[loserIdx].push({ tag: 'Qbat', delta: -debtAmt });
+                sc[winnerIdx] += debtAmt; scBonus[winnerIdx] += debtAmt;
+                tags[winnerIdx].push({ tag: 'Q', delta: +debtAmt });
             }
         }
 
@@ -618,7 +660,7 @@ function addVan() {
     autoSaveSession();
     renderBoard();
 
-    selXam = -1; selChan = -1; selTqDanh = -1; selTqBat = -1; selChay = []; selWin = -1; selDenLang = -1;
+    selXam = -1; selChan = -1; selTqChain = []; selChay = []; selWin = -1; selDenLang = -1;
     document.getElementById('chan-panel').style.display = 'none';
     document.getElementById('xam-tc').checked = false;
     const cp = document.getElementById('chan-picker');
