@@ -5,12 +5,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sâm Lốc — Tính Điểm</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0e3b2c">
+    <link rel="icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sâm Lốc">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 
 <body>
@@ -19,6 +27,14 @@
        INTRO / SPLASH SCREEN
   ═══════════════════════════════ -->
     <div id="intro-splash" role="status" aria-label="Đang tải">
+        <div class="intro-bg-suits" aria-hidden="true">
+            <span class="ibs ibs1">♠</span>
+            <span class="ibs ibs2">♥</span>
+            <span class="ibs ibs3">♦</span>
+            <span class="ibs ibs4">♣</span>
+            <span class="ibs ibs5">♠</span>
+        </div>
+        <div class="intro-glow"></div>
         <div class="intro-card-fan">
             <div class="intro-card c1"><span class="ic-suit ic-black">♠</span></div>
             <div class="intro-card c2"><span class="ic-suit ic-red">♥</span></div>
@@ -27,14 +43,15 @@
             <div class="intro-card c5 back"></div>
         </div>
         <div class="intro-title">
-            <span class="intro-suit-mark">♦</span><span>Sâm</span>&nbsp;Lốc<span class="intro-suit-mark">♣</span>
+            <span class="intro-suit-mark">♦</span><span class="intro-title-text">Sâm&nbsp;Lốc</span><span class="intro-suit-mark">♣</span>
         </div>
         <div class="intro-subtitle">Tool tính điểm</div>
         <div class="intro-loadbar"><div class="intro-loadbar-fill"></div></div>
+        <div class="intro-footer">© 2026 <b>4USER</b> · Sâm Lốc</div>
     </div>
     <script>
         (function () {
-            var MIN_MS = 3600;
+            var MIN_MS = 10000;
             var start = Date.now();
             var splash = document.getElementById('intro-splash');
             document.documentElement.classList.add('intro-lock');
@@ -44,7 +61,7 @@
                 setTimeout(function () {
                     splash.classList.add('intro-hide');
                     document.documentElement.classList.remove('intro-lock');
-                    setTimeout(function () { splash.remove(); }, 650);
+                    setTimeout(function () { splash.remove(); }, 820);
                 }, wait);
             }
             if (document.readyState === 'complete') hide();
@@ -59,7 +76,11 @@
   ═══════════════════════════════ -->
         <div class="header">
             <div style="display:flex;flex-direction:column;gap:2px;">
-                <div class="header-title"><span class="suit-mark">♦</span><span>Sâm</span> Lốc<span class="suit-mark">♣</span></div>
+                <div class="header-title">
+                    <span class="suit-mark">♦</span><span>Sâm</span> Lốc<span class="suit-mark">♣</span>
+                    <span class="big-update-badge" id="big-update-badge" onclick="dismissBigUpdateBadge()"
+                        title="Bấm để ẩn">✨ Big Update</span>
+                </div>
                 <div
                     style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;">
                     Tool tính điểm</div>
@@ -94,11 +115,21 @@
   ═══════════════════════════════ -->
         <div class="page show" id="page-game">
 
+            <div class="shortcut-hint" id="shortcut-hint">
+                <span class="shortcut-hint-text">💡 Mẹo: <kbd class="kbd kbd-sm">Enter</kbd> thêm ván nhanh ·
+                    <kbd class="kbd kbd-sm">1-9</kbd> chọn người thắng ·
+                    <kbd class="kbd kbd-sm">Esc</kbd> đóng cửa sổ</span>
+                <button class="shortcut-hint-close" onclick="dismissShortcutHint()" title="Ẩn gợi ý này">✕</button>
+            </div>
+
             <div class="rule-summary" id="rule-summary"></div>
 
             <!-- Player setup -->
             <div class="card">
-                <div class="card-title">Người chơi</div>
+                <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+                    <span>Người chơi</span>
+                    <button class="btn-outline" style="padding:4px 10px;font-size:12px;" onclick="openPresetsManager()" id="presets-toggle-btn" title="Quản lý tên hay dùng">⭐ Tên hay dùng</button>
+                </div>
                 <div class="btn-group">
                     <button class="btn-outline" onclick="setPlayers(2)" id="pbtn2">2 người</button>
                     <button class="btn-outline" onclick="setPlayers(3)" id="pbtn3">3 người</button>
@@ -106,6 +137,16 @@
                 </div>
                 <div class="player-names" id="player-names"></div>
 
+                <!-- Presets panel: quản lý tên người chơi hay dùng -->
+                <div id="presets-panel" style="display:none;margin-top:10px;padding:10px;border-radius:10px;border:1px solid var(--border2);background:var(--surface2);">
+                    <div style="display:flex;gap:6px;margin-bottom:8px;">
+                        <input type="text" id="preset-input" placeholder="Nhập tên rồi bấm Lưu…"
+                            style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--surface);color:var(--text);font-size:13px;"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewPreset();}">
+                        <button class="btn-outline" style="padding:6px 12px;font-size:13px;" onclick="saveNewPreset()">Lưu</button>
+                    </div>
+                    <div id="preset-chips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                </div>
 
             </div>
 
@@ -311,6 +352,12 @@
                 <div id="sessions-list"></div>
             </div>
             <div class="card">
+                <div class="card-title">🌟 Khoảnh khắc đáng nhớ</div>
+                <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Những kỷ lục nổi bật từ buổi đang
+                    chơi + tất cả buổi đã lưu.</p>
+                <div id="highlights-content"></div>
+            </div>
+            <div class="card">
                 <div class="card-title">🏅 Bảng danh dự cá nhân</div>
                 <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Kỷ lục tổng hợp từ tất cả buổi chơi đã
                     lưu + buổi đang chơi.</p>
@@ -323,6 +370,25 @@
        PAGE: DATA
   ═══════════════════════════════ -->
         <div class="page" id="page-data">
+            <div class="card">
+                <div class="card-title">⌨️ Phím tắt tiện ích</div>
+                <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Dùng bàn phím máy tính để thao tác
+                    nhanh hơn khi đang nhập ván (tab 🃏 Chơi).</p>
+                <div class="shortcut-list">
+                    <div class="shortcut-row">
+                        <kbd class="kbd">Enter</kbd>
+                        <span class="shortcut-desc">Thêm ván này (khi không có modal đang mở)</span>
+                    </div>
+                    <div class="shortcut-row">
+                        <kbd class="kbd">1</kbd><kbd class="kbd">–</kbd><kbd class="kbd">9</kbd>
+                        <span class="shortcut-desc">Chọn người thắng khi bị hòa số lá</span>
+                    </div>
+                    <div class="shortcut-row">
+                        <kbd class="kbd">Esc</kbd>
+                        <span class="shortcut-desc">Đóng modal/cửa sổ đang mở (hoạt động mọi lúc)</span>
+                    </div>
+                </div>
+            </div>
             <div class="card">
                 <div class="card-title">💾 Quản lý dữ liệu</div>
                 <div class="storage-bar">
@@ -432,6 +498,13 @@
     <script src="sound.js"></script>
     <script src="app.js"></script>
     <script src="chart.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => { });
+            });
+        }
+    </script>
 
 </body>
 

@@ -92,25 +92,36 @@ function spawnRipple(btn, e) {
 // CONFETTI
 // ══════════════════════════════════════════════════════════════
 const CONFETTI_COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+const CONFETTI_GOLD = ['#dcaa42', '#f4c15c', '#e8b923', '#fff3c4', '#b8860b'];
 
-function burstConfetti(originEl) {
+function burstConfetti(originEl, opts) {
+    opts = opts || {};
+    const count = opts.count || 22;
+    const colors = opts.gold ? CONFETTI_GOLD : CONFETTI_COLORS;
     const rect = originEl.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top;
     const wrap = document.createElement('div');
     wrap.className = 'confetti-wrap';
     document.body.appendChild(wrap);
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < count; i++) {
         const dot = document.createElement('div');
         dot.className = 'confetti-dot';
         const angle = (Math.random() * 220 - 110) * Math.PI / 180;
-        const dist = 60 + Math.random() * 90;
+        const dist = (opts.gold ? 80 : 60) + Math.random() * (opts.gold ? 130 : 90);
         const tx = Math.sin(angle) * dist;
         const ty = -Math.cos(angle) * dist;
-        dot.style.cssText = `left:${cx}px;top:${cy}px;background:${CONFETTI_COLORS[i % CONFETTI_COLORS.length]};--tx:${tx}px;--ty:${ty}px;--rot:${Math.random() * 540 - 270}deg;animation-delay:${Math.random() * .08}s;animation-duration:${.7 + Math.random() * .35}s;`;
+        dot.style.cssText = `left:${cx}px;top:${cy}px;background:${colors[i % colors.length]};--tx:${tx}px;--ty:${ty}px;--rot:${Math.random() * 540 - 270}deg;animation-delay:${Math.random() * .08}s;animation-duration:${.7 + Math.random() * .35}s;`;
         wrap.appendChild(dot);
     }
     setTimeout(() => wrap.remove(), 1400);
+}
+
+// ══════════════════════════════════════════════════════════════
+// HAPTIC FEEDBACK (mobile)
+// ══════════════════════════════════════════════════════════════
+function haptic(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) { }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -127,20 +138,41 @@ function handleAddVan(e) {
         const result = addVan();
         if (result === false) {
             SFX.play('warn');
+            haptic(60);
             btn.classList.remove('loading'); btn.disabled = false; return;
         }
         btn.classList.remove('loading');
         btn.classList.add('success');
         iconEl.innerHTML = '<span class="check-icon">✓</span>';
         textEl.textContent = `Ván ${history.length} đã lưu!`;
-        burstConfetti(btn);
-        // Chọn sound dựa theo mode/tags
+
+        // Chọn sound + confetti + haptic dựa theo mode/tags
         const lastVan = history[history.length - 1];
+        const flatTags = lastVan ? lastVan.tags.flat().map(t => t.tag || t) : [];
+        const hasXamWin = flatTags.includes('X');
+        const hasTuQuy = flatTags.includes('Q');
+        const hasChay = flatTags.includes('C');
+
         if (lastVan && lastVan.mode === 'xam') {
-            const hasXamWin = lastVan.tags.some(tArr => tArr.some(t => (t.tag || t) === 'X'));
             SFX.play(hasXamWin ? 'xamWin' : 'xamLose');
+            if (hasXamWin) {
+                burstConfetti(btn, { gold: true, count: 40 });
+                haptic([20, 40, 20, 40, 60]);
+            } else {
+                haptic(80);
+            }
         } else {
             SFX.play('success');
+            if (hasTuQuy) {
+                burstConfetti(btn, { gold: true, count: 34 });
+                haptic([15, 30, 15, 30, 50]);
+            } else if (hasChay) {
+                burstConfetti(btn, { count: 28 });
+                haptic([25, 40]);
+            } else {
+                burstConfetti(btn);
+                haptic(15);
+            }
         }
         setTimeout(() => {
             btn.classList.remove('success');
@@ -236,7 +268,10 @@ function save() {
         localStorage.setItem(LS_PLAYERS, JSON.stringify({ numP, pnames }));
         localStorage.setItem(LS_NOTES, JSON.stringify(vanNotes));
         localStorage.setItem(LS_PRESETS, JSON.stringify(playerPresets));
-    } catch (e) { console.warn('localStorage full', e); }
+    } catch (e) {
+        console.warn('localStorage full', e);
+        showToast('⚠️ Bộ nhớ máy đầy — dữ liệu mới có thể chưa lưu được! Vào tab 💾 Dữ liệu để dọn bớt.', 4000);
+    }
 }
 
 function load() {
@@ -295,7 +330,7 @@ function goPage(p) {
     if (p === 'admin') loadAdminFields();
     if (p === 'data') updateStorageInfo();
     if (p === 'chart') renderChartPage();
-    if (p === 'sessions') { renderSessionsList(); renderHonorBoard(); }
+    if (p === 'sessions') { renderSessionsList(); renderHonorBoard(); renderHighlights(); }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1315,6 +1350,7 @@ function renderSettlement(names, tot) {
     }
 
     let html = `<div class="settlement-wrap">
+    <div id="settlement-capture" class="settlement-capture">
     <div class="settlement-title">💰 Thanh toán cuối buổi</div>
     <div class="settlement-list">`;
     txns.forEach(t => {
@@ -1327,7 +1363,11 @@ function renderSettlement(names, tot) {
     </div>`;
     });
     html += `</div>
-    <button class="share-btn" onclick="shareResult()">📤 Chia sẻ kết quả</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="share-btn" onclick="shareResult()">📤 Chia sẻ kết quả</button>
+      <button class="share-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border2);" onclick="exportSettlementImage()">📸 Lưu ảnh</button>
+    </div>
     </div>`;
     wrap.innerHTML = html;
 }
@@ -1413,10 +1453,25 @@ function saveSession() {
     }
     try {
         localStorage.setItem(LS_SESSIONS, JSON.stringify(sessions));
-    } catch (e) { console.warn('sessions save error', e); }
-    SFX.play('save');
+    } catch (e) {
+        console.warn('sessions save error', e);
+        showToast('⚠️ Bộ nhớ máy đầy, buổi chơi có thể chưa lưu được!', 3000);
+    }
+
+    // Vinh danh người dẫn đầu buổi (nếu có người rõ ràng #1, không hòa)
+    const maxTot = Math.max(...tot);
+    const leaders = tot.filter(t => t === maxTot);
+    if (maxTot > 0 && leaders.length === 1) {
+        SFX.play('rank1');
+        const anchor = document.getElementById('nav-sessions') || document.body;
+        burstConfetti(anchor, { gold: true, count: 30 });
+        haptic([20, 30, 20, 30, 20, 60]);
+    } else {
+        SFX.play('save');
+    }
     showToast(`💾 Đã lưu buổi ${label}!`, 2500);
     renderSessionsList();
+    renderHighlights();
 }
 
 // Tự động lưu/cập nhật buổi hiện tại vào sessions (upsert)
@@ -1633,6 +1688,77 @@ function saveNewPreset() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// KHOẢNH KHẮC ĐÁNG NHỚ (highlights)
+// ══════════════════════════════════════════════════════════════
+function buildHighlights() {
+    if (!sessions.length && !history.length) return '<div style="color:var(--muted);text-align:center;padding:16px;font-size:13px;">Chưa đủ dữ liệu để tìm khoảnh khắc đáng nhớ.</div>';
+
+    const allSessions = [...sessions];
+    if (history.length) {
+        const names = history[history.length - 1].names;
+        allSessions.unshift({ names, history, numP });
+    }
+
+    const counts = {}; // name -> {xam, tuquy, chay}
+    let biggestSingle = { val: -Infinity, name: '' };
+    let biggestComeback = { val: -Infinity, name: '' };
+
+    allSessions.forEach(s => {
+        const names = s.names.slice(0, s.numP);
+        const cum = new Array(s.numP).fill(0);
+        const minCum = new Array(s.numP).fill(0);
+        s.history.forEach(v => {
+            v.scores.forEach((sc, pi) => {
+                if (pi >= s.numP) return;
+                const name = names[pi];
+                if (!counts[name]) counts[name] = { xam: 0, tuquy: 0, chay: 0 };
+                (v.tags[pi] || []).forEach(t => {
+                    const tag = typeof t === 'string' ? t : t.tag;
+                    if (tag === 'X') counts[name].xam++;
+                    if (tag === 'Q') counts[name].tuquy++;
+                    if (tag === 'C') counts[name].chay++;
+                });
+                if (sc > biggestSingle.val) biggestSingle = { val: sc, name };
+                cum[pi] += sc;
+                if (cum[pi] < minCum[pi]) minCum[pi] = cum[pi];
+            });
+        });
+        names.forEach((name, pi) => {
+            const cb = cum[pi] - minCum[pi];
+            if (cb > biggestComeback.val) biggestComeback = { val: cb, name };
+        });
+    });
+
+    const byField = (f) => Object.entries(counts).sort((a, b) => b[1][f] - a[1][f])[0];
+    const topXam = byField('xam');
+    const topTuquy = byField('tuquy');
+    const topChay = byField('chay');
+
+    const items = [];
+    if (topXam && topXam[1].xam > 0) items.push({ icon: '🎯', label: 'Sâm thủ', val: `${topXam[0]} — ${topXam[1].xam} lần báo sâm thắng` });
+    if (topTuquy && topTuquy[1].tuquy > 0) items.push({ icon: '👑', label: 'Vua tứ quý', val: `${topTuquy[0]} — ${topTuquy[1].tuquy} lần tứ quý` });
+    if (topChay && topChay[1].chay > 0) items.push({ icon: '🔥', label: 'Cháy nhất', val: `${topChay[0]} — ${topChay[1].chay} lần cháy bài` });
+    if (biggestSingle.name && biggestSingle.val > 0) items.push({ icon: '💥', label: 'Cú nổ lớn nhất', val: `${biggestSingle.name} — +${biggestSingle.val}đ trong 1 ván` });
+    if (biggestComeback.name && biggestComeback.val > 0) items.push({ icon: '📈', label: 'Lội ngược dòng ngoạn mục', val: `${biggestComeback.name} — hồi phục ${biggestComeback.val}đ` });
+
+    if (!items.length) return '<div style="color:var(--muted);text-align:center;padding:16px;font-size:13px;">Chưa đủ dữ liệu để tìm khoảnh khắc đáng nhớ.</div>';
+
+    return `<div class="highlight-grid">` + items.map(it => `
+      <div class="highlight-card">
+        <div class="highlight-icon">${it.icon}</div>
+        <div>
+          <div class="highlight-label">${it.label}</div>
+          <div class="highlight-val">${it.val}</div>
+        </div>
+      </div>`).join('') + `</div>`;
+}
+
+function renderHighlights() {
+    const wrap = document.getElementById('highlights-content');
+    if (wrap) wrap.innerHTML = buildHighlights();
+}
+
+// ══════════════════════════════════════════════════════════════
 // BẢNG DANH DỰ CÁ NHÂN
 // ══════════════════════════════════════════════════════════════
 function buildPersonalHonor() {
@@ -1746,6 +1872,36 @@ function shareResult() {
     }
 }
 
+function exportSettlementImage() {
+    const el = document.getElementById('settlement-capture');
+    if (!el) return;
+    if (typeof html2canvas === 'undefined') {
+        showAlert({ icon: '⚠️', title: 'Không thể xuất ảnh', msg: 'Thư viện xuất ảnh chưa tải được, kiểm tra kết nối mạng rồi thử lại.' });
+        return;
+    }
+    SFX.play('click');
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const bg = isDark ? '#1a2620' : '#fbf8f1';
+    html2canvas(el, { backgroundColor: bg, scale: 2 }).then(canvas => {
+        canvas.toBlob(blob => {
+            if (!blob) return;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const date = new Date().toISOString().slice(0, 10);
+            a.href = url;
+            a.download = `samloc-ketqua-${date}.png`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+            showToast('📸 Đã lưu ảnh kết quả!', 2000);
+            SFX.play('save');
+        }, 'image/png');
+    }).catch(() => {
+        showAlert({ icon: '⚠️', title: 'Xuất ảnh thất bại', msg: 'Có lỗi khi tạo ảnh, thử lại sau nhé.' });
+    });
+}
+
 function copyToClipboard(txt) {
     navigator.clipboard.writeText(txt).then(() => {
         showToast('📋 Đã copy kết quả!', 2000);
@@ -1759,11 +1915,92 @@ function copyToClipboard(txt) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// KEYBOARD SHORTCUTS
+// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+// KEYBOARD SHORTCUTS
+// ══════════════════════════════════════════════════════════════
+const LS_HINT_DISMISSED = 'xamloc_hint_dismissed';
+const LS_BIGUPDATE_DISMISSED = 'xamloc_bigupdate_dismissed';
+
+function dismissBigUpdateBadge() {
+    const el = document.getElementById('big-update-badge');
+    if (!el) return;
+    el.style.animation = 'none';
+    el.style.opacity = '0';
+    el.style.transform = 'scale(.5)';
+    el.style.transition = 'opacity .2s, transform .2s';
+    setTimeout(() => { el.style.display = 'none'; }, 200);
+    try { localStorage.setItem(LS_BIGUPDATE_DISMISSED, '1'); } catch (e) { }
+}
+
+function dismissShortcutHint() {
+    const el = document.getElementById('shortcut-hint');
+    if (!el) return;
+    el.style.animation = 'none';
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(-6px)';
+    el.style.transition = 'opacity .25s, transform .25s';
+    setTimeout(() => { el.style.display = 'none'; }, 250);
+    try { localStorage.setItem(LS_HINT_DISMISSED, '1'); } catch (e) { }
+}
+
+function initKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        const tag = (e.target.tagName || '').toLowerCase();
+        const isTyping = tag === 'input' || tag === 'textarea' || e.target.isContentEditable;
+
+        // Esc luôn đóng modal, kể cả khi đang gõ
+        if (e.key === 'Escape') {
+            const ov = document.getElementById('modal-overlay');
+            if (ov && ov.style.display === 'flex') closeModal();
+            return;
+        }
+
+        if (isTyping) return; // đừng chặn gõ tên người chơi, ghi chú...
+
+        const gamePage = document.getElementById('page-game');
+        if (!gamePage || !gamePage.classList.contains('show')) return;
+
+        // Enter = thêm ván (chỉ khi không có modal đang mở)
+        if (e.key === 'Enter') {
+            const ov = document.getElementById('modal-overlay');
+            if (ov && ov.style.display === 'flex') return;
+            const btn = document.getElementById('add-van-btn');
+            if (btn && !btn.disabled) { e.preventDefault(); handleAddVan(e); }
+            return;
+        }
+
+        // Số 1-9 = chọn người thắng (chỉ áp dụng khi đang ở mode thường, cần chọn thắng)
+        if (/^[1-9]$/.test(e.key)) {
+            const modeNormal = document.getElementById('mode-normal');
+            const winBtn = document.querySelector(`.pick-win-btn`);
+            if (modeNormal && modeNormal.style.display !== 'none' && winBtn) {
+                const idx = parseInt(e.key, 10) - 1;
+                if (idx < numP) { e.preventDefault(); pickWin(idx); SFX.play('pick'); }
+            }
+        }
+    });
+}
+
+// ══════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════
 (function init() {
     // Init sound engine
     if (typeof SFX !== 'undefined') SFX.init();
+
+    // Ẩn gợi ý phím tắt nếu người dùng đã từng tắt trước đó
+    try {
+        if (localStorage.getItem(LS_HINT_DISMISSED) === '1') {
+            const hintEl = document.getElementById('shortcut-hint');
+            if (hintEl) hintEl.style.display = 'none';
+        }
+        if (localStorage.getItem(LS_BIGUPDATE_DISMISSED) === '1') {
+            const badgeEl = document.getElementById('big-update-badge');
+            if (badgeEl) badgeEl.style.display = 'none';
+        }
+    } catch (e) { }
 
     // Apply saved theme
     const savedTheme = localStorage.getItem(LS_THEME);
@@ -1786,4 +2023,50 @@ function copyToClipboard(txt) {
     renderSessionsList();
     renderPresetChips();
     renderHonorBoard();
+    renderHighlights();
+
+    // Parallax nhẹ cho hình nền splash (chuột trên desktop, con quay trên mobile)
+    initSplashParallax();
+    initKeyboardShortcuts();
+
+    // Cảnh báo trước khi rời trang nếu đang nhập dở ván (chưa bấm "Thêm ván này")
+    window.addEventListener('beforeunload', (e) => {
+        const grid = document.getElementById('van-grid');
+        if (!grid) return;
+        const hasUnsavedInput = Array.from(grid.querySelectorAll('input[type="number"]'))
+            .some(inp => inp.value !== '' && inp.value !== null);
+        if (hasUnsavedInput) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
 })();
+
+function initSplashParallax() {
+    const splash = document.getElementById('intro-splash');
+    const suits = document.querySelector('.intro-bg-suits');
+    if (!splash || !suits) return;
+    let raf = null;
+    function setPos(px, py) {
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+            suits.style.setProperty('--mx', px.toFixed(1));
+            suits.style.setProperty('--my', py.toFixed(1));
+            raf = null;
+        });
+    }
+    splash.addEventListener('mousemove', (e) => {
+        const w = window.innerWidth, h = window.innerHeight;
+        const px = ((e.clientX / w) - 0.5) * 18;
+        const py = ((e.clientY / h) - 0.5) * 18;
+        setPos(px, py);
+    });
+    if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', (e) => {
+            if (e.gamma == null || e.beta == null) return;
+            const px = Math.max(-18, Math.min(18, e.gamma / 2));
+            const py = Math.max(-18, Math.min(18, (e.beta - 45) / 4));
+            setPos(px, py);
+        });
+    }
+}

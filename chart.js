@@ -17,7 +17,7 @@ let bdChart = null;
 function renderChartPage() {
     const el = document.getElementById('bd-content');
     if (!history.length) {
-        el.innerHTML = '<div class="bd-empty">Chưa có ván nào — hãy thêm ít nhất 1 ván trong tab 🃏 Chơi rồi quay lại đây!</div>';
+        el.innerHTML = '<div class="bd-empty"><span class="bd-empty-icon">📈</span>Chưa có ván nào — hãy thêm ít nhất 1 ván trong tab 🃏 Chơi rồi quay lại đây!</div>';
         return;
     }
 
